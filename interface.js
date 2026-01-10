@@ -34,11 +34,15 @@ window.sendMessage = async function () {
     // User msg
     addMessage(text, true);
 
+    // Show typing indicator
+    const typingIndicator = addTypingIndicator();
+
     // Thought simulation delay
     await new Promise(r => setTimeout(r, 600));
 
     // Generate
     if (typeof GuahhEngine === 'undefined') {
+        removeTypingIndicator(typingIndicator);
         addMessage("System Error: Neural Engine not loaded.", false);
         activeBtn.disabled = false;
         return;
@@ -53,12 +57,16 @@ window.sendMessage = async function () {
 
     if (!GuahhEngine.isReady) {
         // If STILL not ready
+        removeTypingIndicator(typingIndicator);
         addMessage("System Error: Neural Core failed to initialize.", false);
         activeBtn.disabled = false;
         return;
     }
 
     const result = await GuahhEngine.generateResponse(text);
+
+    // Remove typing indicator
+    removeTypingIndicator(typingIndicator);
 
     // Render AI Msg with feedback buttons
     const aiMessageElement = addMessage(result.text, false);
@@ -104,6 +112,7 @@ function typeWriter(element, text) {
             if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
             setTimeout(type, speed);
         } else {
+            // When done typing, apply markdown formatting while preserving line breaks
             element.innerHTML = formatMarkdown(text);
             if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
         }
@@ -112,7 +121,35 @@ function typeWriter(element, text) {
 }
 
 function formatMarkdown(text) {
-    return text.replace(/\n\n/g, '<br><br>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    // First replace all newlines with <br> tags
+    let formatted = text.replace(/\n/g, '<br>');
+    // Then apply bold formatting
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    return formatted;
+}
+
+function addTypingIndicator() {
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'message ai typing-indicator';
+    typingDiv.innerHTML = `
+        <div class="message-label">Guahh AI 1 (a)</div>
+        <div class="message-content">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+        </div>
+    `;
+    if (activeChat) {
+        activeChat.appendChild(typingDiv);
+        activeChat.scrollTop = activeChat.scrollHeight;
+    }
+    return typingDiv;
+}
+
+function removeTypingIndicator(indicator) {
+    if (indicator && indicator.parentNode) {
+        indicator.parentNode.removeChild(indicator);
+    }
 }
 
 function addFeedbackButtons(messageElement, query, response) {
