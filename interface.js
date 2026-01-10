@@ -1,12 +1,243 @@
 /**
- * Guahh AI - Interface Controller (Dashboard Version)
- * Wires the Chat and Log panels to the Engine.
+ * Guahh AI - Interface Controller with Chat History
+ * Session management, sidebar, and chat interface
  */
+
+// ========== SESSION MANAGEMENT ==========
 
 // Global State
 let activeChat, activeInput, activeBtn, logView, statusText;
 let lastUserQuery = '';
 const feedbackData = [];
+
+// Session Management
+let currentSession = null;
+const STORAGE_KEY = 'guahh_chat_sessions';
+const MAX_SESSIONS = 50; // Limit to prevent localStorage overflow
+
+// Session Class
+class ChatSession {
+    constructor(id = null) {
+        this.id = id || `session_${Date.now()}`;
+        this.title = 'New Chat';
+        this.created = Date.now();
+        this.lastUpdated = Date.now();
+        this.messages = [];
+    }
+
+    addMessage(role, content) {
+        this.messages.push({
+            role, // 'user' or 'assistant'
+            content,
+            timestamp: Date.now()
+        });
+        this.lastUpdated = Date.now();
+
+        // Auto-generate title from first user message
+        if (role === 'user' && this.title === 'New Chat') {
+            this.title = this.generateTitle(content);
+        }
+    }
+
+    generateTitle(message) {
+        const maxLength = 50;
+        let title = message.trim();
+        if (title.length > maxLength) {
+            title = title.substring(0, maxLength) + '...';
+        }
+        return title;
+    }
+}
+
+// Session Storage Functions
+function getAllSessions() {
+    try {
+        const data = localStorage.getItem(STORAGE_KEY);
+        return data ? JSON.parse(data) : [];
+    } catch (e) {
+        console.error('Error loading sessions:', e);
+        return [];
+    }
+}
+
+function saveSession(session) {
+    try {
+        let sessions = getAllSessions();
+
+        // Update or add session
+        const index = sessions.findIndex(s => s.id === session.id);
+        if (index !== -1) {
+            sessions[index] = session;
+        } else {
+            sessions.unshift(session); // Add to beginning
+        }
+
+        // Limit number of sessions
+        if (sessions.length > MAX_SESSIONS) {
+            sessions = sessions.slice(0, MAX_SESSIONS);
+        }
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+        renderSessionList();
+    } catch (e) {
+        console.error('Error saving session:', e);
+    }
+}
+
+function deleteSession(sessionId) {
+    try {
+        let sessions = getAllSessions();
+        sessions = sessions.filter(s => s.id !== sessionId);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+
+        // If deleted current session, create new one
+        if (currentSession && currentSession.id === sessionId) {
+            createNewChat();
+        } else {
+            renderSessionList();
+        }
+    } catch (e) {
+        console.error('Error deleting session:', e);
+    }
+}
+
+function loadSession(sessionId) {
+    const sessions = getAllSessions();
+    const sessionData = sessions.find(s => s.id === sessionId);
+
+    if (!sessionData) return;
+
+    // Reconstruct session object
+    currentSession = new ChatSession(sessionData.id);
+    Object.assign(currentSession, sessionData);
+
+    // Clear and reload messages
+    if (activeChat) {
+        activeChat.innerHTML = '';
+
+        sessionData.messages.forEach(msg => {
+            if (msg.role === 'user') {
+                addMessage(msg.content, true);
+            } else {
+                // Skip typing animation for loaded messages
+                const aiMsg = addMessage(msg.content, false, true);
+                // Don't add feedback buttons to loaded messages
+            }
+        });
+    }
+
+    renderSessionList();
+}
+
+function createNewChat() {
+    // Save current session if it has messages
+    if (currentSession && currentSession.messages.length > 0) {
+        saveSession(currentSession);
+    }
+
+    // Create new session
+    currentSession = new ChatSession();
+
+    // Clear chat area
+    if (activeChat) {
+        activeChat.innerHTML = '';
+    }
+
+    // Clear input
+    if (activeInput) {
+        activeInput.value = '';
+        activeInput.style.height = 'auto';
+    }
+
+    renderSessionList();
+}
+
+function renderSessionList() {
+    const sessionList = document.getElementById('sessionList');
+    if (!sessionList) return;
+
+    const sessions = getAllSessions();
+
+    if (sessions.length === 0) {
+        sessionList.innerHTML = '<div class="session-list-empty">No chat history yet.<br>Start a conversation!</div>';
+        return;
+    }
+
+    sessionList.innerHTML = sessions.map(session => {
+        const isActive = currentSession && currentSession.id === session.id;
+        const date = new Date(session.lastUpdated);
+        const dateStr = formatDate(date);
+
+        return `
+            <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}">
+                <div class="session-text">
+                    <div class="session-title">${escapeHtml(session.title)}</div>
+                    <div class="session-date">${dateStr}</div>
+                </div>
+                <button class="session-delete" data-session-id="${session.id}" title="Delete chat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    // Add click handlers
+    sessionList.querySelectorAll('.session-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (!e.target.closest('.session-delete')) {
+                loadSession(item.dataset.sessionId);
+                // Close sidebar on mobile
+                if (window.innerWidth <= 768) {
+                    toggleSidebar();
+                }
+            }
+        });
+    });
+
+    sessionList.querySelectorAll('.session-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm('Delete this chat?')) {
+                deleteSession(btn.dataset.sessionId);
+            }
+        });
+    });
+}
+
+function formatDate(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Sidebar Toggle (Mobile)
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+
+    if (sidebar && overlay) {
+        sidebar.classList.toggle('active');
+        overlay.classList.toggle('active');
+    }
+}
 
 // Fallback dictionary
 const localFallbackMemory = [
@@ -26,10 +257,18 @@ window.sendMessage = async function () {
     const text = activeInput.value.trim();
     if (!text) return;
 
+    // Create session if none exists
+    if (!currentSession) {
+        currentSession = new ChatSession();
+    }
+
     lastUserQuery = text;
     activeInput.value = '';
     activeInput.style.height = 'auto';
     activeBtn.disabled = true;
+
+    // Add to session
+    currentSession.addMessage('user', text);
 
     // User msg
     addMessage(text, true);
@@ -68,6 +307,10 @@ window.sendMessage = async function () {
     // Remove typing indicator
     removeTypingIndicator(typingIndicator);
 
+    // Add to session
+    currentSession.addMessage('assistant', result.text);
+    saveSession(currentSession);
+
     // Render AI Msg with feedback buttons
     const aiMessageElement = addMessage(result.text, false);
     addFeedbackButtons(aiMessageElement, lastUserQuery, result.text);
@@ -76,7 +319,7 @@ window.sendMessage = async function () {
 };
 
 // Helper Functions
-function addMessage(text, isUser) {
+function addMessage(text, isUser, skipTyping = false) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${isUser ? 'user' : 'ai'}`;
 
@@ -86,7 +329,13 @@ function addMessage(text, isUser) {
             <div class="message-content"></div>
         `;
         const contentDiv = msgDiv.querySelector('.message-content');
-        typeWriter(contentDiv, text);
+        if (skipTyping) {
+            // Show instantly for chat history
+            contentDiv.innerHTML = formatMarkdown(text);
+        } else {
+            // Animated typing for new messages
+            typeWriter(contentDiv, text);
+        }
     } else {
         msgDiv.innerHTML = `
             <div class="message-label">You</div>
@@ -201,6 +450,27 @@ document.addEventListener('DOMContentLoaded', () => {
     activeInput = document.getElementById('userInput') || document.getElementById('user-input');
     activeBtn = document.getElementById('sendBtn') || document.getElementById('send-btn');
     statusText = document.getElementById('status-text');
+
+    // Initialize session management
+    currentSession = new ChatSession();
+    renderSessionList();
+
+    // Sidebar event listeners
+    const newChatBtn = document.getElementById('newChatBtn');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', createNewChat);
+    }
+
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', toggleSidebar);
+    }
+
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', toggleSidebar);
+    }
 
     if (activeInput) {
         activeInput.addEventListener('input', function () {

@@ -10,34 +10,69 @@
 </head>
 
 <body>
-    <div class="chat-container">
-        <!-- Header -->
-        <header class="chat-header">
-            <div class="header-content">
-                <img src="https://raw.githubusercontent.com/guahhinc/guahh/main/guahhai.png" alt="Guahh AI Logo"
-                    height="32" style="margin-right: 8px;">
-                <h1>Guahh AI 1 (a)</h1>
-                <span class="version-badge">BETA 2</span>
+    <!-- Sidebar Toggle (Mobile) -->
+    <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle Sidebar">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+    </button>
+
+    <!-- Sidebar Overlay (Mobile) -->
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+    <!-- Main App Container -->
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <button id="newChatBtn" class="new-chat-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    New Chat
+                </button>
             </div>
-        </header>
+            <div class="sidebar-content">
+                <h3 class="sidebar-title">Chat History</h3>
+                <div id="sessionList" class="session-list">
+                    <!-- Sessions will be populated here -->
+                </div>
+            </div>
+        </aside>
 
-        <!-- Disclaimer -->
-        <div class="disclaimer">
-            ⚠️ AI can make mistakes. Please verify important information.
-        </div>
+        <!-- Main Chat Container -->
+        <div class="chat-container">
+            <!-- Header -->
+            <header class="chat-header">
+                <div class="header-content">
+                    <img src="https://raw.githubusercontent.com/guahhinc/guahh/main/guahhai.png" alt="Guahh AI Logo"
+                        height="32" style="margin-right: 8px;">
+                    <h1>Guahh AI 1 (a)</h1>
+                    <span class="version-badge">BETA 3</span>
+                </div>
+            </header>
 
-        <!-- Chat Area -->
-        <div id="chatArea" class="chat-area"></div>
+            <!-- Disclaimer -->
+            <div class="disclaimer">
+                ⚠️ AI can make mistakes. Please verify important information.
+            </div>
 
-        <!-- Input Area -->
-        <div class="input-container">
-            <textarea id="userInput" placeholder="Message Guahh AI..." rows="1"
-                onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); window.sendMessage(); }"></textarea>
-            <button id="sendBtn" onclick="window.sendMessage()">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-                </svg>
-            </button>
+            <!-- Chat Area -->
+            <div id="chatArea" class="chat-area"></div>
+
+            <!-- Input Area -->
+            <div class="input-container">
+                <textarea id="userInput" placeholder="Message Guahh AI..." rows="1"
+                    onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); window.sendMessage(); }"></textarea>
+                <button id="sendBtn" onclick="window.sendMessage()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                    </svg>
+                </button>
+            </div>
         </div>
     </div>
 

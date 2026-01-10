@@ -1,6 +1,6 @@
 /**
- * Guahh AI - Neural Engine V8.0 (Ultra-Intelligence)
- * Features: 30+ Intents, 12 Intelligent Wikipedia Strategies, Partial Knowledge Synthesis, Advanced Context Understanding
+ * Guahh AI - Neural Engine V8.1 (Ultra-Intelligence + Safety)
+ * Features: 30+ Intents, 12 Intelligent Wikipedia Strategies, Partial Knowledge Synthesis, Advanced Context Understanding, Content Safety Filter, Enhanced Brainstorming
  */
 
 const GuahhEngine = {
@@ -12,6 +12,56 @@ const GuahhEngine = {
     lastTopic: null,
     emotion: "neutral", // Current emotional state
 
+    // Content Safety Filter - Prevents inappropriate language
+    contentSafetyFilter: [
+        // Racial slurs and hate speech
+        /\bn[i1!]gg[e3a@][r\$]s?\b/gi,
+        /\bn[i1!]gg[a@]h?s?\b/gi,
+        /\bch[i1!]nk\b/gi,
+        /\bsp[i1!]c\b/gi,
+        /\bg[o0][o0]k\b/gi,
+        /\bk[i1!]k[e3]\b/gi,
+        /\bw[e3]tb[a@]ck\b/gi,
+        // Profanity and vulgar terms
+        /\bf[u\*]ck(ing|er|ed)?\b/gi,
+        /\bsh[i1!]t(ty|ing|ted)?\b/gi,
+        /\bb[i1!]tch(es|ing|y)?\b/gi,
+        /\bc[u\*]nt\b/gi,
+        /\bd[a@]mn(ed)?\b/gi,
+        /\bh[e3]ll\b/gi,
+        /\b[a@]ss(hole|h[o0]le)?\b/gi,
+        /\bcr[a@]p(py)?\b/gi,
+        // Offensive terms and slurs
+        /\bf[a@]g(got)?\b/gi,
+        /\bdy[k3]e\b/gi,
+        /\br[e3]t[a@]rd(ed)?\b/gi,
+        /\btr[a@]nny\b/gi
+    ],
+
+    // Brainstorming Idea Generators by Topic Type
+    brainstormGenerators: {
+        // For concrete items (clothes, food, gadgets, etc.)
+        concrete: {
+            styles: ['minimalist', 'vintage', 'futuristic', 'eclectic', 'classic', 'bohemian', 'modern', 'rustic'],
+            descriptors: ['unique', 'eye-catching', 'sophisticated', 'casual', 'elegant', 'bold', 'refined', 'playful'],
+            occasions: ['everyday wear', 'special occasions', 'work/professional', 'weekend casual', 'evening events', 'outdoor activities'],
+        },
+        // For activities and hobbies
+        activities: {
+            approaches: ['beginner-friendly', 'challenging', 'social', 'solo', 'creative', 'physical', 'relaxing', 'adventurous'],
+            benefits: ['skill-building', 'stress-relief', 'fitness', 'creativity', 'social connection', 'personal growth'],
+        },
+        // For business and projects
+        business: {
+            models: ['subscription-based', 'marketplace', 'SaaS platform', 'community-driven', 'freemium', 'B2B service'],
+            innovations: ['AI-powered', 'blockchain-based', 'eco-friendly', 'social enterprise', 'mobile-first', 'data-driven'],
+        },
+        // For creative projects
+        creative: {
+            mediums: ['digital art', 'photography series', 'short film', 'podcast', 'blog', 'social media campaign', 'interactive installation'],
+            themes: ['storytelling', 'social commentary', 'personal journey', 'cultural exploration', 'experimental'],
+        },
+    },
 
     // Config
     vocab: new Set(),
@@ -112,13 +162,65 @@ const GuahhEngine = {
     },
 
     isMetaQuery(query) {
+        const q = query.toLowerCase();
+
+        // Questions about the AI's identity and capabilities
         const metaPatterns = [
-            /who are you/i, /what (are|is) you/i, /your name/i, /tell me about yourself/i, /introduce yourself/i, /what (are|is) guahh/i,
-            /^can you (code|program|write code|help|assist|do|make)/i, /^can you (answer|explain|tell|show|teach|create)/i, /are you able to/i,
-            /^do you (code|program|write code|know|understand)/i, /^do you (have|support|offer|provide)/i,
-            /what can you do/i, /what (are|is) your (purpose|function|capabilities)/i, /how do you work/i, /what do you do/i, /what are you (good|capable) of/i
+            // Identity questions
+            /^(who|what) (are|is) (you|guahh)/i,
+            /^your name/i,
+            /^tell me about (yourself|you|guahh)/i,
+            /^introduce yourself/i,
+
+            // Capability questions - starts with "can you" or "do you"
+            /^can you (help|assist|do|make|create|write|code|answer|explain|tell|show|teach)/i,
+            /^are you (able|capable)/i,
+            /^do you (know|understand|have|support|offer|provide|code|program)/i,
+            /^will you/i,
+            /^could you/i,
+
+            // Function/purpose questions
+            /what can you do/i,
+            /what are you (for|good at|capable of)/i,
+            /what (is|are) your (purpose|function|capabilities|features|abilities)/i,
+            /how do you work/i,
+            /what do you do/i,
+            /how (are you|does this) (made|built|created)/i,
+
+            // Version/update questions
+            /what version/i,
+            /when (were you|was this) (created|made|built|updated)/i,
         ];
+
         return metaPatterns.some(p => p.test(query));
+    },
+
+    isSearchQuery(query) {
+        // Questions that require external knowledge/Wikipedia search
+        const q = query.toLowerCase();
+
+        // If it's a meta query, it's NOT a search query
+        if (this.isMetaQuery(query)) return false;
+
+        // Factual/informational question patterns
+        const searchPatterns = [
+            // Definitional questions about external topics
+            /^what (is|are|was|were) (a|an|the)?\s*(?!you|your|guahh)/i,
+            /^who (is|are|was|were)\s+(?!you)/i,
+            /^where (is|are|was|were)/i,
+            /^when (did|was|were|is)/i,
+            /^why (is|are|was|were|did|do|does)/i,
+            /^how (does|do|did|is|are)\s+(?!you|this|guahh)/i,
+
+            // Information requests about external topics
+            /^(tell me about|explain|describe|define)\s+(?!yourself|you|guahh)/i,
+            /^(facts about|information on|details about)/i,
+
+            // Specific entity queries (proper nouns often indicate search queries)
+            /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/,  // Proper nouns
+        ];
+
+        return searchPatterns.some(p => p.test(query));
     },
 
     isCodingRequest(query) {
@@ -1202,9 +1304,267 @@ const GuahhEngine = {
     // ========== END PARAPHRASING SYSTEM ==========
 
 
+    // Content Safety Filter Method
+    applySafetyFilter(text) {
+        if (!text) return text;
+
+        let filteredText = text;
+        let hasViolation = false;
+
+        // Check for inappropriate content
+        for (const pattern of this.contentSafetyFilter) {
+            if (pattern.test(filteredText)) {
+                hasViolation = true;
+                // Replace inappropriate words with asterisks
+                filteredText = filteredText.replace(pattern, (match) => '*'.repeat(match.length));
+            }
+        }
+
+        if (hasViolation) {
+            this.onLog("Content safety filter applied", "warning");
+        }
+
+        return filteredText;
+    },
+
+    // Enhanced Brainstorming Method - Works for ANY topic
+    generateBrainstormIdeas(topic) {
+        this.onLog(`Generating brainstorm ideas for: "${topic}"`, "process");
+
+        const ideas = [];
+        const topicType = this.detectTopicType(topic);
+
+        // Generate 6-8 unique ideas based on topic type
+        const numberOfIdeas = 6 + Math.floor(Math.random() * 3);
+
+        for (let i = 0; i < numberOfIdeas; i++) {
+            const idea = this.generateContextualIdea(topic, topicType, i);
+            if (idea) {
+                ideas.push(`${i + 1}. ${idea}`);
+            }
+        }
+
+        return ideas.join('\n\n');
+    },
+
+    detectTopicType(topic) {
+        const t = topic.toLowerCase();
+
+        // Concrete items (fashion, food, gadgets)
+        if (/outfit|cloth|wear|fashion|dress|shirt|pants|shoe|accessory|jewelry/i.test(t)) return 'fashion';
+        if (/food|meal|recipe|dish|snack|drink|cuisine/i.test(t)) return 'food';
+        if (/gadget|device|tool|product|item/i.test(t)) return 'product';
+
+        // Activities and hobbies
+        if (/activity|activities|hobby|hobbies|thing to do|ways to/i.test(t)) return 'activity';
+        if (/game|sport|exercise|workout/i.test(t)) return 'activity';
+
+        // Business and professional
+        if (/business|startup|company|venture|service/i.test(t)) return 'business';
+        if (/app|software|platform|website|tool/i.test(t)) return 'tech';
+
+        // Creative projects
+        if (/project|creative|art|design|content|campaign/i.test(t)) return 'creative';
+        if (/story|book|film|music|video|podcast/i.test(t)) return 'creative';
+
+        // Learning and education
+        if (/learn|study|course|skill|topic|subject/i.test(t)) return 'learning';
+
+        // Default
+        return 'general';
+    },
+
+    generateContextualIdea(topic, type, index) {
+        switch (type) {
+            case 'fashion':
+                return this.generateFashionIdea(topic, index);
+            case 'food':
+                return this.generateFoodIdea(topic, index);
+            case 'activity':
+                return this.generateActivityIdea(topic, index);
+            case 'business':
+                return this.generateBusinessIdea(topic, index);
+            case 'tech':
+                return this.generateTechIdea(topic, index);
+            case 'creative':
+                return this.generateCreativeIdea(topic, index);
+            case 'product':
+                return this.generateProductIdea(topic, index);
+            case 'learning':
+                return this.generateLearningIdea(topic, index);
+            default:
+                return this.generateGeneralIdea(topic, index);
+        }
+    },
+
+    generateFashionIdea(topic, index) {
+        const styles = ['minimalist monochrome', 'vintage-inspired', 'modern athleisure', 'bohemian layered',
+            'classic tailored', 'streetwear casual', 'elegant sophisticated', 'eclectic mixed-pattern'];
+        const occasions = ['work meetings', 'casual weekends', 'date nights', 'outdoor adventures',
+            'formal events', 'creative gatherings', 'everyday comfort', 'special celebrations'];
+        const features = ['comfortable and practical', 'statement-making bold', 'seasonally appropriate',
+            'versatile mix-and-match', 'trend-forward unique', 'timeless classic'];
+
+        const templates = [
+            `${styles[index % styles.length]} look perfect for ${occasions[index % occasions.length]}`,
+            `${features[index % features.length]} ensemble with ${styles[(index + 2) % styles.length]} vibes`,
+            `Layer textures and colors for a ${styles[(index + 1) % styles.length]} aesthetic`,
+            `${occasions[(index + 3) % occasions.length]} outfit featuring ${features[(index + 1) % features.length]} pieces`,
+            `Experiment with a ${styles[(index + 3) % styles.length]} style mixing unexpected elements`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateFoodIdea(topic, index) {
+        const cuisines = ['Mediterranean', 'Asian fusion', 'comfort food', 'farm-to-table', 'plant-based', 'artisanal'];
+        const styles = ['quick weeknight', 'gourmet weekend', 'healthy balanced', 'indulgent treat', 'meal-prep friendly'];
+
+        const templates = [
+            `${styles[index % styles.length]} ${topic} with ${cuisines[index % cuisines.length]} influences`,
+            `Creative twist on ${topic} using seasonal ingredients and bold flavors`,
+            `${cuisines[(index + 1) % cuisines.length]} inspired ${topic} perfect for ${index % 2 === 0 ? 'sharing' : 'solo dining'}`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateActivityIdea(topic, index) {
+        const approaches = ['social group', 'solo mindful', 'challenging skill-building', 'relaxing therapeutic',
+            'outdoor adventure', 'creative expression', 'fitness-focused', 'community service'];
+        const benefits = ['stress relief', 'personal growth', 'physical wellness', 'social connection', 'creativity', 'mindfulness'];
+
+        const templates = [
+            `${approaches[index % approaches.length]} approach focusing on ${benefits[index % benefits.length]}`,
+            `Try ${topic} as a ${approaches[(index + 2) % approaches.length]} experience`,
+            `Combine ${topic} with ${benefits[(index + 1) % benefits.length]} for holistic wellness`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateBusinessIdea(topic, index) {
+        const models = ['subscription service', 'marketplace platform', 'consulting agency', 'SaaS solution', 'community hub', 'B2B service'];
+        const innovations = ['AI-powered', 'sustainability-focused', 'mobile-first', 'data-driven', 'social impact', 'automation-based'];
+
+        const templates = [
+            `${innovations[index % innovations.length]} ${models[index % models.length]} for ${topic}`,
+            `Launch a ${models[(index + 1) % models.length]} that revolutionizes ${topic}`,
+            `Create an ${innovations[(index + 2) % innovations.length]} approach to ${topic}`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateTechIdea(topic, index) {
+        const tech = ['AI/ML', 'blockchain', 'VR/AR', 'IoT', 'cloud-based', 'mobile app', 'web platform', 'API service'];
+        const features = ['automation', 'personalization', 'real-time collaboration', 'predictive analytics', 'gamification', 'social integration'];
+
+        const templates = [
+            `${tech[index % tech.length]} ${topic} with ${features[index % features.length]} features`,
+            `Build a ${tech[(index + 1) % tech.length]} solution that adds ${features[(index + 2) % features.length]} to ${topic}`,
+            `${topic} platform leveraging ${tech[(index + 2) % tech.length]} for ${features[(index + 1) % features.length]}`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateCreativeIdea(topic, index) {
+        const mediums = ['photography series', 'short film', 'interactive installation', 'podcast series',
+            'social media campaign', 'illustrated blog', 'video documentary', 'digital art collection'];
+        const themes = ['personal storytelling', 'social commentary', 'cultural exploration', 'experimental abstract',
+            'community voices', 'historical perspective', 'future vision'];
+
+        const templates = [
+            `${mediums[index % mediums.length]} exploring ${topic} through ${themes[index % themes.length]}`,
+            `${themes[(index + 1) % themes.length]} ${mediums[(index + 2) % mediums.length]} centered on ${topic}`,
+            `Create a ${mediums[(index + 1) % mediums.length]} that reimagines ${topic} with ${themes[(index + 2) % themes.length]}`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateProductIdea(topic, index) {
+        const features = ['eco-friendly', 'smart/connected', 'customizable', 'portable', 'multifunctional', 'premium quality'];
+        const markets = ['busy professionals', 'environmentally conscious consumers', 'tech enthusiasts',
+            'minimalists', 'families', 'creative individuals'];
+
+        const templates = [
+            `${features[index % features.length]} ${topic} designed for ${markets[index % markets.length]}`,
+            `Innovative ${topic} with ${features[(index + 1) % features.length]} features targeting ${markets[(index + 2) % markets.length]}`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateLearningIdea(topic, index) {
+        const formats = ['online course', 'workshop series', 'mentorship program', 'self-paced bootcamp',
+            'certification program', 'community learning circle', 'practical project-based'];
+        const approaches = ['beginner-friendly', 'advanced mastery', 'hands-on practical', 'theory and application', 'collaborative peer'];
+
+        const templates = [
+            `${approaches[index % approaches.length]} ${formats[index % formats.length]} for ${topic}`,
+            `${formats[(index + 1) % formats.length]} with ${approaches[(index + 2) % approaches.length]} approach to ${topic}`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateGeneralIdea(topic, index) {
+        const approaches = ['innovative', 'community-driven', 'sustainable', 'technology-enhanced', 'collaborative', 'experimental'];
+        const actions = ['platform', 'initiative', 'project', 'movement', 'solution', 'approach'];
+
+        const templates = [
+            `${approaches[index % approaches.length]} ${actions[index % actions.length]} for ${topic}`,
+            `Create a ${approaches[(index + 1) % approaches.length]} way to approach ${topic}`,
+            `Launch a ${actions[(index + 2) % actions.length]} that reimagines ${topic} using ${approaches[(index + 2) % approaches.length]} methods`,
+        ];
+
+        return templates[index % templates.length];
+    },
+
+    generateCustomBrainstormIdea(topic) {
+        const ideaPrefixes = [
+            "What if we could",
+            "Imagine creating",
+            "Consider developing",
+            "How about building",
+            "Picture designing"
+        ];
+
+        const ideaMiddles = [
+            "a revolutionary way to approach",
+            "an entirely new perspective on",
+            "a collaborative platform centered around",
+            "a data-driven solution for",
+            "a community-focused initiative for"
+        ];
+
+        const ideaSuffixes = [
+            "that empowers individuals to make a difference",
+            "bringing together diverse perspectives",
+            "using cutting-edge innovation",
+            "that creates lasting positive impact",
+            "transforming how people engage with the world"
+        ];
+
+        const prefix = ideaPrefixes[Math.floor(Math.random() * ideaPrefixes.length)];
+        const middle = ideaMiddles[Math.floor(Math.random() * ideaMiddles.length)];
+        const suffix = ideaSuffixes[Math.floor(Math.random() * ideaSuffixes.length)];
+
+        return `${prefix} ${middle} ${topic || 'this concept'}, ${suffix}?`;
+    },
+
     async generateResponse(query) {
         try {
-            return await this._generateResponseInternal(query);
+            const response = await this._generateResponseInternal(query);
+
+            // Apply safety filter to response text
+            if (response && response.text) {
+                response.text = this.applySafetyFilter(response.text);
+            }
+
+            return response;
         } catch (error) {
             this.onLog(`ERROR in generateResponse: ${error.message}`, "error");
             console.error("Generate Response Error:", error);
@@ -1338,6 +1698,41 @@ const GuahhEngine = {
             }
         }
 
+        // --- EXTRACT TOPIC EARLY FOR USE IN VARIOUS INTENTS ---
+        let topic = this.extractTopic(effectiveQuery);
+
+        // --- BRAINSTORMING INTENT ---
+        if (intentAnalysis.primary === 'brainstorm' || /brainstorm|ideas? for|suggest|come up with|give.*ideas?/i.test(cleanQuery)) {
+            this.onLog("Intent: BRAINSTORMING", "process");
+
+            // Extract topic for brainstorming - clean up common phrases
+            let brainstormTopic = effectiveQuery
+                .replace(/^(brainstorm|give me|suggest|come up with|think of|show me|tell me)\s+/i, '')
+                .replace(/^(some |a |an |the )?(ideas?|suggestions?|thoughts?)\s+(for|about|on|regarding)\s+/i, '')
+                .replace(/\s+to\s+(wear|make|do|try|use|create|build)$/i, '')
+                .replace(/\?+$/, '')
+                .trim();
+
+            // If still empty after cleaning, use the topic extraction
+            if (!brainstormTopic || brainstormTopic.length < 2) {
+                brainstormTopic = topic || 'general concepts';
+            }
+
+            const ideas = this.generateBrainstormIdeas(brainstormTopic);
+
+            const intro = brainstormTopic
+                ? `Here are some creative ideas for **${brainstormTopic}**:\n\n`
+                : "Here are some creative ideas:\n\n";
+
+            const result = {
+                text: intro + ideas,
+                sources: ["Creative Brainstorming Engine"]
+            };
+            this.addToHistory(query, result.text);
+            this.responseCache.set(cacheKey, result);
+            return result;
+        }
+
         // --- SUMMARIZATION ---
         if (/^(summarize|summarise|sum up|summary)/i.test(cleanQuery)) {
             this.onLog("Intent: SUMMARIZATION", "process");
@@ -1352,16 +1747,22 @@ const GuahhEngine = {
             }
         }
 
-        // --- WIKIPEDIA PRIORITY FOR LOCAL MODE ---
-        let topic = this.extractTopic(effectiveQuery);
-        const searchQuery = topic || effectiveQuery; // fallback to full query if no topic
+        // --- INTELLIGENT SEARCH ROUTING ---
+        const searchQuery = topic || effectiveQuery;
+        const needsSearch = this.isSearchQuery(effectiveQuery);
+        const hasLittleMemory = this.memory.length < 50;
 
-        // Always attempt Wikipedia if we have a valid topic or it looks like a question
-        const isQuestion = /what|who|where|when|how|define|explain/i.test(effectiveQuery);
-        const hasLittleMemory = this.memory.length < 50; // Local mode usually has ~3 items
+        // Priority Wikipedia search for:
+        // 1. Explicit search queries (what is X, who is Y, etc.)
+        // 2. Local mode with little memory
+        // 3. Questions with proper nouns (likely entities)
+        if (needsSearch || hasLittleMemory) {
+            if (needsSearch) {
+                this.onLog("🔍 Search query detected - engaging Wikipedia...", "process");
+            } else {
+                this.onLog("Local mode - attempting Wikipedia search...", "process");
+            }
 
-        if (hasLittleMemory || isQuestion) {
-            this.onLog("Engaging Live Search (Wikipedia)...", "process");
             const wikiResult = await this.searchWikipedia(searchQuery, false);
             if (wikiResult) {
                 this.onLog("✓ Wikipedia Data Retrieved.", "success");
@@ -1369,6 +1770,9 @@ const GuahhEngine = {
                 this.addToHistory(query, result.text);
                 this.responseCache.set(cacheKey, result);
                 return result;
+            } else if (needsSearch) {
+                // If it's clearly a search query but Wikipedia failed, inform user
+                this.onLog("Wikipedia search failed for factual query", "warning");
             }
         }
         // -----------------------------------------
@@ -1884,9 +2288,11 @@ const GuahhEngine = {
 
     addToHistory(query, response) {
         this.conversationHistory.push({ query, response, timestamp: Date.now() });
-        if (this.conversationHistory.length > 10) this.conversationHistory.shift();
+        // Increased from 10 to 50 for better context retention
+        if (this.conversationHistory.length > 50) this.conversationHistory.shift();
         this.recentOutputs.push(response);
-        if (this.recentOutputs.length > 5) this.recentOutputs.shift();
+        // Increased from 5 to 15 for better output diversity tracking
+        if (this.recentOutputs.length > 15) this.recentOutputs.shift();
     },
 
     checkDictionaryInquiry(query) {
