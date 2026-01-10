@@ -42,15 +42,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Boot Sequence
-    let bootInterval = setInterval(() => {
-        if (window.GUAHH_MEMORY) {
-            clearInterval(bootInterval);
+    statusText.innerText = 'Initializing Neural Core...'; // Update UI
 
+    fetch('memory.json')
+        .then(response => {
+            if (!response.ok) throw new Error("Failed to load memory bank");
+            return response.json();
+        })
+        .then(data => {
+            logToTerminal("Memory bank loaded successfully.", "success");
             setTimeout(() => {
-                GuahhEngine.init(window.GUAHH_MEMORY, console.log);
+                GuahhEngine.init(data, logToTerminal); // Pass custom logger
+                statusText.innerText = 'Guahh AI One (a)'; // Reset status
             }, 300);
-        }
-    }, 200);
+        })
+        .catch(err => {
+            console.error(err);
+            logToTerminal("CRITICAL: Failed to load memory.json. Is the file missing?", "error");
+            statusText.innerText = 'Error: Memory Missing';
+        });
 
     // Messaging
     let lastUserQuery = '';
