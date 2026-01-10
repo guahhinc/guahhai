@@ -586,6 +586,11 @@ const GuahhEngine = {
             intents.push({ type: 'utility', confidence: 0.99 });
         }
 
+        // === CASUAL / SHORT RESPONSE INTENTS (Prevent Dictionary Definitions) ===
+        if (/^(cool|nice|awesome|great|ok|okay|wow|sweet|good|thanks|thank you|thx|thanks!)$/i.test(q)) {
+            intents.push({ type: 'casual', confidence: 1.0 }); // Override everything else
+        }
+
         // === UTILITY INTENTS ===
         if (/(time|date|clock|year|month|day is it)/i.test(q) && /(what|current|tell me)/i.test(q)) {
             intents.push({ type: 'utility', confidence: 0.96 });
@@ -666,6 +671,15 @@ const GuahhEngine = {
             hasPronouns: /\b(it|that|this|they|them|these|those)\b/i.test(query),
             isFollowUp: this.isContextualFollowUp(query)
         };
+
+        // Detect pending actions from the last question
+        if (context.lastAIQuestion) {
+            if (/dig deeper|more details|history of this/i.test(context.lastAIQuestion)) {
+                context.pendingAction = 'DEEP_SEARCH';
+            } else if (/search|look up|find/i.test(context.lastAIQuestion)) {
+                context.pendingAction = 'SEARCH';
+            }
+        }
 
         // If query has pronouns, resolve them
         if (context.hasPronouns && context.lastTopic) {
@@ -1811,11 +1825,17 @@ const GuahhEngine = {
         }
 
         if (/random number/i.test(q)) {
-            const match = q.match(/between\s+(\d+)\s+and\s+(\d+)/i);
+            // Supports "1-10", "1 to 10", "between 1 and 10"
+            const match = q.match(/(\d+)[\s-]*(?:to|and|-)\s*(\d+)|between\s+(\d+)\s+and\s+(\d+)/i);
             let min = 1, max = 100;
             if (match) {
-                min = parseInt(match[1]);
-                max = parseInt(match[2]);
+                // Match groups can vary based on which part of regex hit
+                const v1 = match[1] || match[3];
+                const v2 = match[2] || match[4];
+                if (v1 && v2) {
+                    min = parseInt(v1);
+                    max = parseInt(v2);
+                }
             }
             const result = Math.floor(Math.random() * (max - min + 1)) + min;
             this.lastResponseType = 'RNG';
@@ -1869,6 +1889,24 @@ const GuahhEngine = {
 
             this.onLog("Found pending question + secondary answer intent -> Re-prioritizing.", "warning");
             intentAnalysis.primary = intentAnalysis.secondary.includes('confirmation') ? 'confirmation' : 'negation';
+        }
+
+        // === HANDLE PENDING ACTIONS (e.g. "Shall I dig deeper?") ===
+        if (intentAnalysis.primary === 'confirmation' && queryContext.pendingAction === 'DEEP_SEARCH') {
+            this.onLog("Action Confirmed: DEEP_SEARCH", "process");
+            const searchTopic = queryContext.lastTopic || effectiveQuery;
+            const wikiResult = await this.searchWikipedia("history of " + searchTopic, true);
+            if (wikiResult) {
+                // Update topic context
+                this.lastTopic = searchTopic;
+
+                const response = {
+                    text: wikiResult,
+                    sources: ["Wikipedia", "Knowledge Base"]
+                };
+                this.addToHistory(query, response.text);
+                return response;
+            }
         }
 
         if (this.isGreeting(effectiveQuery)) {
@@ -1950,6 +1988,40 @@ const GuahhEngine = {
                 return result;
             } else {
                 return { text: "I don't have anything recent to adjust. Could you provide some text?", sources: [] };
+            }
+        }
+
+        // --- EXPANSION / TELL ME MORE ---
+        if (intentAnalysis.primary === 'expand' || /tell me more|more detail|go on|elaborate|continue/i.test(effectiveQuery)) {
+            this.onLog("Intent: EXPANSION", "process");
+            const topicToExpand = this.lastTopic || this.extractTopic(effectiveQuery);
+
+            if (topicToExpand) {
+                const wikiResult = await this.searchWikipedia("more details about " + topicToExpand, true);
+                if (wikiResult) {
+                    const result = {
+                        text: `Here is more detailed information about **${topicToExpand}**:\n\n${wikiResult}`,
+                        sources: ["Wikipedia (Deep Search)"]
+                    };
+                    this.addToHistory(query, result.text);
+                    return result;
+                }
+            } else {
+                return { text: "I'd love to tell you more, but I'm not sure which topic we're discussing. Could you be specific?", sources: ["Conversational"] };
+            }
+        }
+
+        // --- SIMPLIFICATION ---
+        if (intentAnalysis.primary === 'simplify' || /explain.*like.*5|simple terms/i.test(effectiveQuery)) {
+            this.onLog("Intent: SIMPLIFICATION", "process");
+            const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
+            if (lastOutput) {
+                const simplified = this.paraphraseText(lastOutput, 'simple'); // reusing paraphrase with simple style
+                const result = { text: `Here is a simpler explanation:\n\n${simplified}`, sources: ["Simplifier"] };
+                this.addToHistory(query, result.text);
+                return result;
+            } else {
+                return { text: "I don't have anything recent to simplify. Could you provide some text?", sources: [] };
             }
         }
 
@@ -2126,16 +2198,28 @@ const GuahhEngine = {
 
             // Detect creative type
             let creativeText = "";
+
+            // Extract word count if present (e.g. "500 words", "200 word")
+            let targetWordCount = 100; // Default
+            const wordCountMatch = effectiveQuery.match(/(\d+)\s*words?/i);
+            if (wordCountMatch) {
+                targetWordCount = parseInt(wordCountMatch[1]);
+                // Cap at reasonable limit for performance/sanity
+                if (targetWordCount > 2000) targetWordCount = 2000;
+                if (targetWordCount < 50) targetWordCount = 50;
+                this.onLog(`Target Word Count: ${targetWordCount}`, "info");
+            }
+
             if (/letter|email/i.test(effectiveQuery)) {
                 this.onLog("Generating Letter...", "process");
                 creativeText = this.generateLetter(topic, wikiContext);
             } else if (/story|tale|narrative/i.test(effectiveQuery)) {
                 this.onLog("Generating Story...", "process");
-                creativeText = this.generateStory(topic, wikiContext);
+                creativeText = this.generateStory(topic, wikiContext, targetWordCount);
             } else {
                 // Default to story for generic "write about X"
                 this.onLog("Generating Creative Content...", "process");
-                creativeText = this.generateStory(topic, wikiContext);
+                creativeText = this.generateStory(topic, wikiContext, targetWordCount);
             }
 
             const result = {
@@ -2415,13 +2499,20 @@ const GuahhEngine = {
         return text;
     },
 
-    generateStory(topic, externalContext = "") {
+    generateStory(topic, externalContext = "", targetLength = 100) {
         const templates = [
             `Once upon a time, there was a ${topic}. It lived in a world full of wonder and mystery.`,
             `In a distant land, a ${topic} began its journey. The path ahead was unknown but exciting.`,
             `The legend of the ${topic} is known throughout the kingdom. It started on a stormy night.`,
             `Nobody knew where the ${topic} came from, but everyone knew it was special.`
         ];
+        // If topic is academic/essay-like, use more formal openers
+        if (targetLength > 300) {
+            templates.push(`The concept of ${topic} has long fascinated scholars and enthusiasts alike.`);
+            templates.push(`When examining ${topic}, it is important to understand its fundamental possibilities.`);
+            templates.push(`${topic} plays a significant role in our understanding of the modern world.`);
+        }
+
         const seed = templates[Math.floor(Math.random() * templates.length)];
 
         // Improve n-gram source: Use the seed ALONG WITH some random memory entries to provide grammar/vocabulary.
@@ -2440,7 +2531,24 @@ const GuahhEngine = {
         // We effectively train the model on provided examples + the seed + generic corpus to prevent loops
         const sourceText = seed + " " + backgroundKnowledge.substring(0, 5000) + " " + this.genericCorpus;
 
-        return seed + "\n\n" + this.generateNeuralText(sourceText, 80);
+        // Long essay generation strategy:
+        // Generate in chunks if target length is large
+        if (targetLength > 200) {
+            let essay = seed;
+            // Approx 50 words per chunk for the neural generator + overhead
+            const chunks = Math.ceil(targetLength / 60);
+            let currentText = seed;
+
+            for (let i = 0; i < chunks; i++) {
+                // Generate next chunk based on recent context
+                const nextChunk = this.generateNeuralText(sourceText + " " + currentText.slice(-200), 60);
+                essay += "\n\n" + nextChunk;
+                currentText = nextChunk;
+            }
+            return essay;
+        }
+
+        return seed + "\n\n" + this.generateNeuralText(sourceText, targetLength);
     },
 
     detectSentiment(text) {
