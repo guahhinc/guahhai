@@ -175,10 +175,14 @@ body {
 }
 
 @keyframes typing {
-    0%, 60%, 100% {
+
+    0%,
+    60%,
+    100% {
         opacity: 0.3;
         transform: scale(1);
     }
+
     30% {
         opacity: 1;
         transform: scale(1.2);
@@ -305,6 +309,7 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
 /* ========== SIDEBAR ========== */
 
 /* Sidebar Container */
@@ -495,6 +500,7 @@ body {
 
 /* ========== RESPONSIVE MOBILE ========== */
 @media (max-width: 768px) {
+
     /* Show toggle button on mobile */
     .sidebar-toggle {
         display: flex;
@@ -516,8 +522,8 @@ body {
         transform: translateX(0);
     }
 
-    /* Show overlay when sidebar is active */
-    .sidebar.active ~ * .sidebar-overlay {
+    /* Show overlay when it has active class */
+    .sidebar-overlay.active {
         display: block;
     }
 
