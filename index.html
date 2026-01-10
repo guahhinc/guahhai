@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guahh AI One (a)</title>
+    <link rel="icon" href="https://raw.githubusercontent.com/guahhinc/guahh/main/guahhaifavicon.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-content">
+                <img src="https://raw.githubusercontent.com/guahhinc/guahh/main/guahhai.png" alt="Guahh AI Logo"
+                    height="32" style="margin-right: 8px;">
+                <h1>Guahh AI One</h1>
+                <span class="version-badge">(a)</span>
+            </div>
+        </header>
+
+        <!-- Disclaimer -->
+        <div class="disclaimer">
+            ⚠️ AI can make mistakes. Please verify important information.
+        </div>
+
+        <!-- Chat Area -->
+        <div id="chatArea" class="chat-area"></div>
+
+        <!-- Input Area -->
+        <div class="input-container">
+            <textarea id="userInput" placeholder="Message Guahh AI..." rows="1"></textarea>
+            <button id="sendBtn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script src="memory.js"></script>
+    <!-- Engine -->
+    <script src="engine.js"></script>
+    <!-- Logic -->
+    <script src="interface.js"></script>
+</body>
+
+</html>
