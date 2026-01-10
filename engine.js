@@ -151,7 +151,7 @@ const GuahhEngine = {
 
     isContextualFollowUp(query) {
         const q = query.toLowerCase();
-        return /\b(it|that|this|longer|shorter|more|detail|elaborate|continue|again)\b/i.test(q);
+        return /\b(it|that|this|longer|shorter|more|detail|elaborate|continue|again|summarize|summarise|summary)\b/i.test(q);
     },
 
     extractTopic(query) {
@@ -215,7 +215,8 @@ const GuahhEngine = {
         this.onLog(`Wikipedia: Smart search for "${query}"...`, "process");
         let result = null;
 
-        const cleanQuery = query.replace(/^(what is|who is|tell me about|define|search for|meaning of|information on|facts about)\s+/i, '');
+        let cleanQuery = query.replace(/^(what is|who is|tell me about|define|search for|meaning of|information on|facts about)\s+/i, '');
+        cleanQuery = cleanQuery.replace(/\?+$/, '').trim(); // Remove trailing question marks
         result = await this._fetchWikipedia(cleanQuery, isLongForm);
         if (result) return this._cacheAndReturn(query, result);
 
@@ -323,6 +324,20 @@ const GuahhEngine = {
             }
         }
 
+        // --- SUMMARIZATION ---
+        if (/^(summarize|summarise|sum up|summary)/i.test(cleanQuery)) {
+            this.onLog("Intent: SUMMARIZATION", "process");
+            const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
+            if (lastOutput) {
+                const summary = this.summarizeText(lastOutput);
+                const result = { text: summary, sources: ["Analytical Engine"] };
+                this.addToHistory(query, result.text);
+                return result;
+            } else {
+                return { text: "I don't have anything recent to summarize.", sources: [] };
+            }
+        }
+
         // --- WIKIPEDIA PRIORITY FOR LOCAL MODE ---
         let topic = this.extractTopic(query);
         const searchQuery = topic || query; // fallback to full query if no topic
@@ -409,6 +424,23 @@ const GuahhEngine = {
             "My database doesn't contain enough information about that subject."
         ];
         return responses[Math.floor(Math.random() * responses.length)];
+    },
+
+    summarizeText(text) {
+        const sentences = text.split('. ').filter(s => s.trim().length > 10);
+        if (sentences.length <= 1) return "That's already quite short: " + text;
+
+        // Simple extraction summarization: First sentence + any sentence with "important" keywords or just the last one
+        const first = sentences[0];
+        const last = sentences[sentences.length - 1];
+
+        // If > 5 sentences, pick a middle one too
+        let middle = "";
+        if (sentences.length > 5) {
+            middle = sentences[Math.floor(sentences.length / 2)] + ". ";
+        }
+
+        return `In summary: ${first}. ${middle}${last}.`;
     },
 
     generateNeuralText(sourceText, targetLength = 40, retryCount = 0) {

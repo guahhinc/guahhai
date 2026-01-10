@@ -74,7 +74,7 @@ function addMessage(text, isUser) {
 
     if (!isUser) {
         msgDiv.innerHTML = `
-            <div class="message-label">Guahh AI One (a)</div>
+            <div class="message-label">Guahh AI 1 (a)</div>
             <div class="message-content"></div>
         `;
         const contentDiv = msgDiv.querySelector('.message-content');
@@ -201,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
             if (window.GuahhEngine) {
                 GuahhEngine.init(localFallbackMemory, logToTerminal);
-                if (statusText) statusText.innerText = 'Guahh AI One (Local Mode)';
+                if (statusText) statusText.innerText = 'Guahh AI (Local Mode)';
             }
         }, 500);
 
@@ -217,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                     if (window.GuahhEngine) {
                         GuahhEngine.init(data, logToTerminal);
-                        if (statusText) statusText.innerText = 'Guahh AI One (a)';
+                        if (statusText) statusText.innerText = 'Guahh AI 1 (a)';
                     }
                 }, 300);
             })
