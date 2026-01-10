@@ -427,10 +427,75 @@ function createBtn(icon, text) {
 function handleFeedback(clickedBtn, otherBtn, query, response, rating) {
     logFeedback(query, response, rating);
     clickedBtn.classList.add('selected');
-    clickedBtn.classList.add(rating); // Add class for specific styling
+    clickedBtn.classList.add(rating);
     otherBtn.disabled = true;
     clickedBtn.disabled = true;
     otherBtn.style.opacity = '0.3';
+
+    // If negative feedback, show refinement options
+    if (rating === 'bad') {
+        const feedbackContainer = clickedBtn.parentElement;
+        const refinements = document.createElement('div');
+        refinements.style.marginTop = '8px';
+        refinements.style.display = 'flex';
+        refinements.style.gap = '6px';
+        refinements.style.flexWrap = 'wrap';
+
+        const options = [
+            { id: 'too_simple', label: 'Too Simple' },
+            { id: 'too_complex', label: 'Too Complex' },
+            { id: 'inaccurate', label: 'Inaccurate' }
+        ];
+
+        options.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.className = 'feedback-btn';
+            btn.style.fontSize = '0.75rem';
+            btn.innerText = opt.label;
+            btn.onclick = async () => {
+                // Disable all refinement buttons
+                Array.from(refinements.children).forEach(b => b.disabled = true);
+                btn.classList.add('selected');
+
+                await triggerRegeneration(query, opt.id, response);
+            };
+            refinements.appendChild(btn);
+        });
+
+        feedbackContainer.parentElement.appendChild(refinements);
+    }
+}
+
+async function triggerRegeneration(query, issueType, originalResponse) {
+    // Show AI is working
+    const typingIndicator = addTypingIndicator();
+    activeChat.scrollTop = activeChat.scrollHeight;
+
+    try {
+        const result = await GuahhEngine.generateRefinedResponse(query, issueType, originalResponse);
+
+        removeTypingIndicator(typingIndicator);
+
+        // Add specific intro based on issue
+        let intro = "Let me try to improve that.";
+        if (issueType === 'too_simple') intro = "I'll elaborate with more detail.";
+        if (issueType === 'too_complex') intro = "I'll simplify that explanation.";
+        if (issueType === 'inaccurate') intro = "Let me correct that information.";
+
+        const fullText = `**${intro}**\n\n${result.text}`;
+
+        const newMsg = addMessage(fullText, false);
+        currentSession.addMessage('assistant', fullText);
+        saveSession(currentSession);
+
+        // Add feedback buttons to the new message too (recursive improvement!)
+        addFeedbackButtons(newMsg, query, fullText);
+
+    } catch (e) {
+        console.error(e);
+        removeTypingIndicator(typingIndicator);
+        addMessage("Sorry, I couldn't regenerate the response.", false);
+    }
 }
 
 function logToTerminal(msg, type = "info") {

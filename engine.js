@@ -161,6 +161,15 @@ const GuahhEngine = {
         return cleaned;
     },
 
+    sanitizeInput(query) {
+        // Remove emojis and other non-standard text characters that might break regex or processing
+        // Keep alphanumeric, punctuation, and basic symbols
+        if (!query) return "";
+        return query.replace(/[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')
+            .replace(/[^\x00-\x7F]+/g, '') // Aggressive: remove all non-ASCII for now to be safe
+            .trim();
+    },
+
     isMetaQuery(query) {
         const q = query.toLowerCase();
 
@@ -387,6 +396,11 @@ const GuahhEngine = {
             intents.push({ type: 'gratitude', confidence: 0.95 });
         }
 
+        // Generic Casual/Small Talk intent
+        if (/^(how are you|what.*up|how.*going|good day|nice to meet|who.*you)/i.test(q) && !/who (is|are|was|were) (the|a|an)?\s*[A-Z]/i.test(q)) {
+            intents.push({ type: 'casual', confidence: 0.92 });
+        }
+
         // === QUESTION INTENTS ===
 
         // Factual question
@@ -477,6 +491,14 @@ const GuahhEngine = {
             intents.push({ type: 'opinion', confidence: 0.82 });
         }
 
+        // Confirmation/Negation (for answering questions)
+        if (/^(yes|yeah|yep|sure|absolutely|correct|right|i do)$/i.test(q)) {
+            intents.push({ type: 'confirmation', confidence: 0.95 });
+        }
+        if (/^(no|nope|nah|not really|i don't|wrong)$/i.test(q)) {
+            intents.push({ type: 'negation', confidence: 0.95 });
+        }
+
         // === COMPUTATIONAL INTENTS ===
 
         // Math intent
@@ -552,6 +574,29 @@ const GuahhEngine = {
             intents.push({ type: 'verification', confidence: 0.85 });
         }
 
+        // === TIME / UTILITY MODIFIER CHECK ===
+        // If the user's query is a modifier for the last response, treat it as a utility query
+        if (this.lastResponseType === 'TIME' && /24.*hour|military|12.*hour|standard/i.test(q)) {
+            intents.push({ type: 'utility', confidence: 0.99 });
+        }
+        if (this.lastResponseType === 'DICE' && /again|another|one more/i.test(q)) {
+            intents.push({ type: 'utility', confidence: 0.99 });
+        }
+        if (this.lastResponseType === 'COIN' && /again|another|one more/i.test(q)) {
+            intents.push({ type: 'utility', confidence: 0.99 });
+        }
+
+        // === UTILITY INTENTS ===
+        if (/(time|date|clock|year|month|day is it)/i.test(q) && /(what|current|tell me)/i.test(q)) {
+            intents.push({ type: 'utility', confidence: 0.96 });
+        }
+        if (/(random number|pick a number|roll a dice|roll a die|roll d\d+|flip a coin|coin toss|heads or tails)/i.test(q)) {
+            intents.push({ type: 'utility', confidence: 0.96 });
+        }
+        if (/(spell.*backwards?|reverse.*word|backwards? spelling)/i.test(q)) {
+            intents.push({ type: 'utility', confidence: 0.96 });
+        }
+
         return intents;
     },
 
@@ -612,8 +657,12 @@ const GuahhEngine = {
         const context = {
             query: query,
             lastTopic: this.lastTopic,
+            lastResponseType: this.lastResponseType || null, // Track what kind of response we just gave
             recentQueries: history.slice(-3).map(h => h.query),
             recentResponses: history.slice(-3).map(h => h.response),
+            lastAIQuestion: history.length > 0 && history[history.length - 1].response.trim().endsWith('?')
+                ? history[history.length - 1].response
+                : null,
             hasPronouns: /\b(it|that|this|they|them|these|those)\b/i.test(query),
             isFollowUp: this.isContextualFollowUp(query)
         };
@@ -631,13 +680,38 @@ const GuahhEngine = {
     resolvePronouns(query, context) {
         let resolved = query;
 
-        if (!context.lastTopic) return query;
+        // If no topic, maybe check if we can infer one from recent history
+        let topic = context.lastTopic;
+        if (!topic && context.recentQueries.length > 0) {
+            // Try to find a topic in the last user query
+            // This is a simple heuristic fallback
+            const lastUserQuery = context.recentQueries[context.recentQueries.length - 1];
+            topic = this.extractTopic(lastUserQuery);
+        }
+
+        if (!topic) return query;
+
+        // "Tell me more" pattern - implicit reference
+        if (/^(tell me more|go on|continue|expand|details|elaborate)$/i.test(query.trim())) {
+            return `${query} about ${topic}`;
+        }
+
+        // "Why?" pattern - implicit reference
+        if (/^why\??$/i.test(query.trim())) {
+            return `why is ${topic} like that?`;
+        }
 
         // Replace common pronouns with the last topic
-        resolved = resolved
-            .replace(/\bit\b/gi, context.lastTopic)
-            .replace(/\bthat\b/gi, context.lastTopic)
-            .replace(/\bthis\b/gi, context.lastTopic);
+        // We use a more careful boundary check
+        resolved = resolved.replace(/\b(it|that|this|the first one)\b/gi, (match) => {
+            // detailed logic could go here, for now swapping it in
+            return topic;
+        });
+
+        // "and?" pattern
+        if (/^and\??$/i.test(query.trim())) {
+            return `what else about ${topic}?`;
+        }
 
         return resolved;
     },
@@ -1555,6 +1629,125 @@ const GuahhEngine = {
         return `${prefix} ${middle} ${topic || 'this concept'}, ${suffix}?`;
     },
 
+    generateFusionIdea(topic) {
+        const domains = ['Bio-mimicry', 'Cyberpunk', 'Minimalism', 'Quantum mechanics', 'Retro-futurism', 'Social psychology', 'Sustainable design'];
+        const actions = ['gamify', 'decentralize', 'visualize', 'automate', 'democratize', 'hybridize', 'remix'];
+        const outputs = ['mobile app', 'urban installation', 'wearable device', 'subscription box', 'community platform', 'short film', 'AI assistant'];
+
+        const d = domains[Math.floor(Math.random() * domains.length)];
+        const a = actions[Math.floor(Math.random() * actions.length)];
+        const o = outputs[Math.floor(Math.random() * outputs.length)];
+
+        return `**Fusion Concept**: A unique ${o} that uses **${d}** principles to **${a}** the experience of ${topic}.`;
+    },
+
+    // ========== CONVERSATIONAL ENGINE ==========
+
+    // Advanced Feedback Regeneration
+    async generateRefinedResponse(query, issueType, originalResponse) {
+        this.onLog(`Refining response for issue: ${issueType}`, "process");
+
+        let refinementPrompt = "";
+
+        if (issueType === 'too_simple') {
+            refinementPrompt = `elaborate on ${query} with more technical details and depth`;
+        } else if (issueType === 'too_complex') {
+            refinementPrompt = `explain ${query} simply like I'm 5`;
+        } else if (issueType === 'inaccurate') {
+            // Force search if accuracy is questioned
+            this.onLog("Accuracy challenged - engaging deep search", "warning");
+            const wikiResult = await this.searchWikipedia(query, true); // Force long search
+            if (wikiResult) {
+                return { text: `I apologize for the inaccuracy. Here is verified information from Wikipedia:\n\n${wikiResult}`, sources: ["Wikipedia (Verified)"] };
+            }
+            refinementPrompt = `correct the information about ${query}`;
+        } else {
+            refinementPrompt = `improve the answer for ${query}`;
+        }
+
+        // Recursive call with specific instructions
+        return await this._generateResponseInternal(refinementPrompt);
+    },
+
+    shouldAskFollowUp(query, responseText) {
+        // Don't follow up on short greetings or if already asking a question
+        if (responseText.length < 50 || responseText.includes('?')) return false;
+        // 30% chance to follow up on substantial responses
+        return Math.random() > 0.7;
+    },
+
+    generateFollowUpQuestion(topic) {
+        const starters = [
+            "Does that make sense to you?",
+            `Have you explored ${topic} before?`,
+            "Would you like more specific details on any part of that?",
+            "What are your thoughts on this approach?",
+            "Shall I dig deeper into the history of this?"
+        ];
+        return starters[Math.floor(Math.random() * starters.length)];
+    },
+
+    generateConversationalResponse(intent, query, context) {
+        const q = query.toLowerCase();
+
+        // 1. Casual / Small Talk
+        if (intent === 'casual' || intent === 'greeting') {
+            if (/how are you|how.*doing/i.test(q)) {
+                return { text: "I'm functioning perfectly, thanks for asking! I'm ready to help you with research, writing, or just chatting. How can I help you today?", sources: ["Conversational"] };
+            }
+            if (/what.*up/i.test(q)) {
+                return { text: "Not much, just processing data and ready to assist you. What's on your mind?", sources: ["Conversational"] };
+            }
+            if (/who.*you/i.test(q)) { // Redundant with meta but good fallback
+                return { text: "I'm Guahh AI, your virtual assistant. I can help with analysis, creative writing, coding, and more.", sources: ["Conversational"] };
+            }
+            // General Friendly Fallback
+            return { text: "Hello! It's great to connect with you. What would you like to explore today?", sources: ["Conversational"] };
+        }
+
+        // 2. Gratitude
+        if (intent === 'gratitude') {
+            const responses = [
+                "You're very welcome! Let me know if you need anything else.",
+                "Happy to help!",
+                "No problem at all. Is there anything else I can do for you?",
+                "Glad I could be of assistance!"
+            ];
+            return { text: responses[Math.floor(Math.random() * responses.length)], sources: ["Conversational"] };
+        }
+
+        // 3. Farewell
+        if (intent === 'farewell') {
+            return { text: "Goodbye! Have a wonderful day. I'll be here if you need me.", sources: ["Conversational"] };
+        }
+
+        // 4. Opinion / Advice (Simulated)
+        if (intent === 'opinion' || intent === 'recommendation') {
+            // Basic opinion simulation
+            if (/movie|film/i.test(q)) return { text: "I don't watch movies, but classics like 'The Godfather' or sci-fi like 'Interstellar' are often highly recommended for their storytelling and visuals.", sources: ["Knowledge Base"] };
+            if (/book|read/i.test(q)) return { text: "Reading is excellent. 'Sapiens' by Yuval Noah Harari is a popular choice for non-fiction, while '1984' remains a relevant classic.", sources: ["Knowledge Base"] };
+            if (/language/i.test(q)) return { text: "Python is great for beginners and AI, while JavaScript is essential for the web. It depends on what you want to build!", sources: ["Knowledge Base"] };
+
+            return { text: "That's an interesting question. I think exploring different perspectives is always valuable. Could you share more details so I can give a better recommendation?", sources: ["Conversational"] };
+        }
+
+        // 5. Handling Answers (Confirmation/Negation)
+        if (intent === 'confirmation' || intent === 'negation') {
+            if (context.lastAIQuestion) {
+                // Simple acknowledgement of the answer
+                if (intent === 'confirmation') {
+                    return { text: "Great! I'm glad to hear that. Is there anything specific about it you'd like to discuss?", sources: ["Conversational"] };
+                } else {
+                    return { text: "I understand. Everyone has different preferences. What do you prefer instead?", sources: ["Conversational"] };
+                }
+            }
+            // Fallback if we don't know what they are saying yes/no to
+            return { text: "I'm not sure what we're confirming, but I appreciate your enthusiasm! What shall we talk about next?", sources: ["Conversational"] };
+        }
+
+        return null; // Fallback to standard generation
+    },
+
     async generateResponse(query) {
         try {
             const response = await this._generateResponseInternal(query);
@@ -1566,7 +1759,7 @@ const GuahhEngine = {
 
             return response;
         } catch (error) {
-            this.onLog(`ERROR in generateResponse: ${error.message}`, "error");
+            this.onLog(`ERROR in generateResponse: ${error.message} \nStack: ${error.stack}`, "error");
             console.error("Generate Response Error:", error);
             return {
                 text: "I encountered an error while processing your request. Please try rephrasing your question or asking something else.",
@@ -1575,14 +1768,86 @@ const GuahhEngine = {
         }
     },
 
+    processUtilityRequest(query) {
+        const q = query.toLowerCase();
+
+        // 1. Time / Date
+        // Check for context-aware followups (e.g., "what about in 24 hour format?")
+        if (/(time|clock)/i.test(q) || (this.lastResponseType === 'TIME' && /24.*hour|military|12.*hour|standard/i.test(q))) {
+            const now = new Date();
+            const is24 = /24.*hour|military/i.test(q);
+            const timeStr = now.toLocaleTimeString('en-US', { hour12: !is24, hour: 'numeric', minute: '2-digit' });
+            const response = `The current time is **${timeStr}**.`;
+            this.lastResponseType = 'TIME';
+            return { text: response, sources: ["System Clock"] };
+        }
+        if (/(date|year|month|day)/i.test(q)) {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const response = `Today is **${dateStr}**.`;
+            this.lastResponseType = 'DATE';
+            return { text: response, sources: ["System Clock"] };
+        }
+
+        // 2. Random Number / Coin / Dice
+        if (/flip.*coin|coin.*toss|heads.*tails|flip again/i.test(q)) {
+            const result = Math.random() > 0.5 ? "Heads" : "Tails";
+            this.lastResponseType = 'COIN';
+            return { text: `It's **${result}**!`, sources: ["Random Number Generator"] };
+        }
+
+        if (/roll.*d(\d+)/i.test(q)) {
+            const match = q.match(/roll.*d(\d+)/i);
+            const sides = parseInt(match[1]);
+            const result = Math.floor(Math.random() * sides) + 1;
+            this.lastResponseType = 'DICE';
+            return { text: `Rolling a d${sides}... **${result}**!`, sources: ["Dice Roller"] };
+        }
+
+        if (/roll.*dice|roll.*die|roll again/i.test(q)) {
+            const result = Math.floor(Math.random() * 6) + 1;
+            this.lastResponseType = 'DICE';
+            return { text: `Rolling a die... **${result}**!`, sources: ["Dice Roller"] };
+        }
+
+        if (/random number/i.test(q)) {
+            const match = q.match(/between\s+(\d+)\s+and\s+(\d+)/i);
+            let min = 1, max = 100;
+            if (match) {
+                min = parseInt(match[1]);
+                max = parseInt(match[2]);
+            }
+            const result = Math.floor(Math.random() * (max - min + 1)) + min;
+            this.lastResponseType = 'RNG';
+            return { text: `Here's a random number between ${min} and ${max}: **${result}**`, sources: ["Random Number Generator"] };
+        }
+
+        // 3. Spell Backwards
+        if (/spell.*backwards?|reverse/i.test(q)) {
+            // Extract target word/phrase: "spell apple backwards" -> "apple"
+            const clean = q.replace(/spell|backwards?|reverse|word|phrase|say|tell me how to/gi, '').trim();
+            const reversed = clean.split('').reverse().join('');
+            this.lastResponseType = 'SPELL';
+            return { text: `"${clean}" spelled backwards is **"${reversed}"**.`, sources: ["String Processor"] };
+        }
+
+        return null;
+    },
+
     async _generateResponseInternal(query) {
         // ALLOW WIKIPEDIA EVEN IF NOT FULLY READY (for Local Mode)
         // if (!this.isReady) return { text: "Neural core not initialized.", sources: [] };
 
-        this.onLog(`Received input: "${query}"`, "input");
+        // SANITIZE INPUT (Fixes Emoji Crash)
+        const sanitizedQuery = this.sanitizeInput(query);
+        if (!sanitizedQuery || sanitizedQuery.length === 0) {
+            return { text: "I couldn't understand that. Could you try typing it again with standard text?", sources: ["Input Handler"] };
+        }
+
+        this.onLog(`Received input: "${sanitizedQuery}"`, "input");
 
         // Build query context for better understanding
-        const queryContext = this.buildQueryContext(query, this.conversationHistory);
+        const queryContext = this.buildQueryContext(sanitizedQuery, this.conversationHistory);
 
         // Use the resolved query (with pronouns replaced) for better understanding
         const effectiveQuery = queryContext.resolvedQuery || query;
@@ -1594,6 +1859,16 @@ const GuahhEngine = {
 
         if (intentAnalysis.secondary.length > 0) {
             this.onLog(`Secondary Intents: ${intentAnalysis.secondary.join(', ')}`, "info");
+        }
+
+        // === PRIORITY HANDLING FOR PENDING QUESTIONS ===
+        // If the AI previously asked a question, prioritize confirmation/negation over other intents
+        // Example: "Yes thank you" -> detected as Gratitude (primary) but is actually an Answer (secondary)
+        if (queryContext.lastAIQuestion &&
+            (intentAnalysis.secondary.includes('confirmation') || intentAnalysis.secondary.includes('negation'))) {
+
+            this.onLog("Found pending question + secondary answer intent -> Re-prioritizing.", "warning");
+            intentAnalysis.primary = intentAnalysis.secondary.includes('confirmation') ? 'confirmation' : 'negation';
         }
 
         if (this.isGreeting(effectiveQuery)) {
@@ -1678,6 +1953,48 @@ const GuahhEngine = {
             }
         }
 
+        if (intentAnalysis.primary === 'utility' || intentAnalysis.secondary.includes('utility')) {
+            this.onLog("Intent: UTILITY / TOOL", "process");
+            const utilResult = this.processUtilityRequest(effectiveQuery);
+            if (utilResult) {
+                this.addToHistory(query, utilResult.text);
+                return utilResult;
+            }
+        }
+
+        // --- CONVERSATIONAL & CASUAL HANDLING ---
+        //Handle explicit conversational intents or high-confidence casual queries
+        if (['casual', 'greeting', 'farewell', 'gratitude', 'opinion', 'recommendation', 'confirmation', 'negation'].includes(intentAnalysis.primary) ||
+            intentAnalysis.secondary.includes('casual')) {
+
+            this.onLog(`Intent: CONVERSATIONAL (${intentAnalysis.primary})`, "process");
+            // Pass the updated Context (with lastAIQuestion) to the handler
+            const chatResult = this.generateConversationalResponse(intentAnalysis.primary, effectiveQuery, queryContext);
+            // Proactive Follow-up (Experimental)
+            if (chatResult && this.shouldAskFollowUp(q, chatResult.text)) {
+                // No specific topic for small talk usually, but let's try
+                const followup = "Is there anything specific you'd like to talk about?";
+                chatResult.text += `\n\n${followup}`;
+            }
+
+            if (chatResult) {
+                this.addToHistory(query, chatResult.text);
+                return chatResult;
+            }
+        }
+
+        // --- ELABORATION / FOLLOW-UP HANDLING ---
+        if (intentAnalysis.primary === 'expand' || intentAnalysis.primary === 'followup') {
+            this.onLog("Intent: ELABORATION", "process");
+            // If we have a topic, treat it like a search or detailed general query about that topic
+            if (topic) {
+                // For now, we can route this to the Wikipedia search or general generation
+                // But strictly looking for "more info"
+                this.onLog(`Elaborating on: ${topic}`, "info");
+                // Let it fall through to search/general generation with the RESOLVED query (e.g. "tell me more about [topic]")
+            }
+        }
+
         const cacheKey = effectiveQuery.toLowerCase().trim();
         if (this.responseCache.has(cacheKey)) {
             this.onLog("Using cached response", "success");
@@ -1719,6 +2036,12 @@ const GuahhEngine = {
             }
 
             const ideas = this.generateBrainstormIdeas(brainstormTopic);
+
+            // If topic is valid, maybe include a Fusion Idea for flavor
+            if (brainstormTopic.length > 3 && Math.random() > 0.5) {
+                const fusion = this.generateFusionIdea(brainstormTopic);
+                ideas += `\n\n${fusion}`;
+            }
 
             const intro = brainstormTopic
                 ? `Here are some creative ideas for **${brainstormTopic}**:\n\n`
@@ -1766,7 +2089,14 @@ const GuahhEngine = {
             const wikiResult = await this.searchWikipedia(searchQuery, false);
             if (wikiResult) {
                 this.onLog("✓ Wikipedia Data Retrieved.", "success");
-                const result = { text: wikiResult, sources: ["Wikipedia"] };
+                let text = wikiResult;
+
+                // Add follow up if topic is clear
+                if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
+                    text += `\n\n${this.generateFollowUpQuestion(topic)}`;
+                }
+
+                const result = { text: text, sources: ["Wikipedia"] };
                 this.addToHistory(query, result.text);
                 this.responseCache.set(cacheKey, result);
                 return result;
@@ -1818,26 +2148,12 @@ const GuahhEngine = {
         }
         // -----------------------------------------
 
-
         this.onLog("Scanning local memory...", "warning");
         const retrievalTokens = topic ? this.tokenize(topic) : qTokens;
         const relevantDocs = this.retrieveRelevant(retrievalTokens);
 
-        // No matches at all
-        if (relevantDocs.length === 0 || relevantDocs[0].score < 0.08) {
-            this.onLog("No relevant context found in any source.", "error");
-
-            // FINAL FALLBACK
-            const result = {
-                text: "I don't have that information in my local database, and I couldn't find it on Wikipedia right now. Could you try rephrasing your question or asking about something else?",
-                sources: []
-            };
-            this.addToHistory(query, result.text);
-            return result;
-        }
-
-        // Strong match - return directly
-        if (relevantDocs[0].score >= 0.4) {
+        // 1. STRONG MATCH - Return directly
+        if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.4) {
             this.onLog(`Top Local Match (${(relevantDocs[0].score * 100).toFixed(0)}%): "${relevantDocs[0].doc.a.substring(0, 30)}..."`, "data");
             const result = { text: relevantDocs[0].doc.a, sources: ["Local Memory"] };
             this.addToHistory(query, result.text);
@@ -1845,17 +2161,38 @@ const GuahhEngine = {
             return result;
         }
 
-        // Weak matches (0.08 - 0.4) - synthesize partial knowledge
-        this.onLog(`Weak matches found (best: ${(relevantDocs[0].score * 100).toFixed(0)}%). Synthesizing partial knowledge...`, "process");
-        const synthesized = this.synthesizePartialKnowledge(relevantDocs, query, topic);
+        // 2. WEAK MATCHES - Synthesize partial knowledge
+        if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.08) {
+            this.onLog(`Weak matches found (best: ${(relevantDocs[0].score * 100).toFixed(0)}%). Synthesizing partial knowledge...`, "process");
+            const synthesized = this.synthesizePartialKnowledge(relevantDocs, query, topic);
 
-        const result = {
-            text: synthesized,
-            sources: ["Knowledge Synthesis", "Local Memory"]
+            const result = {
+                text: synthesized,
+                sources: ["Knowledge Synthesis", "Local Memory"]
+            };
+            this.addToHistory(query, result.text);
+            this.responseCache.set(cacheKey, result);
+            return result;
+        }
+
+        // 3. FINAL FALLBACK - General Template Generation
+        // (Replaces the old "I don't know" error)
+        this.onLog("No local matches. Generating general template response...", "process");
+        const template = this.generateGeneralTemplate(topic || effectiveQuery);
+        let text = template;
+
+        // Add proactive follow-up for general templates
+        if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
+            text += `\n\n${this.generateFollowUpQuestion(topic)}`;
+        }
+
+        const fallbackResult = {
+            text: text,
+            sources: ["General Knowledge Engine"]
         };
-        this.addToHistory(query, result.text);
-        this.responseCache.set(cacheKey, result);
-        return result;
+        this.addToHistory(query, fallbackResult.text);
+        this.responseCache.set(cacheKey, fallbackResult);
+        return fallbackResult;
     },
 
     retrieveRelevant(qTokens) {
