@@ -169,30 +169,51 @@ document.addEventListener('DOMContentLoaded', () => {
     // Boot Sequence
     if (statusText) statusText.innerText = 'Initializing Neural Core...';
 
-    fetch('memory.json')
-        .then(response => {
-            if (!response.ok) throw new Error("Failed to load memory bank");
-            return response.json();
-        })
-        .then(data => {
-            logToTerminal("Memory bank loaded successfully.", "success");
-            setTimeout(() => {
-                if (window.GuahhEngine) {
-                    GuahhEngine.init(data, logToTerminal);
-                    if (statusText) statusText.innerText = 'Guahh AI One (a)';
-                }
-            }, 300);
-        })
-        .catch(err => {
-            console.error(err);
-            logToTerminal("CRITICAL: Failed to load memory.json.", "error");
-            if (window.location.protocol === 'file:') {
-                logToTerminal("ERROR: Browsers block reading files directly (CORS). Please invoke Guahh using a local web server.", "error");
+    // Fallback dictionary for local mode
+    const localFallbackMemory = [
+        { q: "hi", a: "Hello! I am running in Local Mode. My full memory is disabled because browsers block file reading for security. To unlock my full brain, please open this folder with a Local Server (like VS Code Live Server) or upload me to GitHub!", tokens: ["hi"] },
+        { q: "hello", a: "Hello! I am running in Local Mode. My full memory is disabled because browsers block file reading for security. To unlock my full brain, please open this folder with a Local Server (like VS Code Live Server) or upload me to GitHub!", tokens: ["hello"] },
+        { q: "who are you", a: "I am Guahh AI One (a). I am currently operating in restricted Local Mode.", tokens: ["who", "are", "you"] }
+    ];
+
+    const isLocal = window.location.protocol === 'file:';
+
+    if (isLocal) {
+        // LOCAL MODE: Skip fetch and use fallback immediately
+        logToTerminal("⚠ LOCAL FILE MODE DETECTED", "warning");
+        logToTerminal("Browsers block 'memory.json' when opening files directly.", "warning");
+        logToTerminal("Initializing with reduced fallback memory...", "process");
+
+        setTimeout(() => {
+            if (window.GuahhEngine) {
+                GuahhEngine.init(localFallbackMemory, logToTerminal);
+                if (statusText) statusText.innerText = 'Guahh AI One (Local Mode)';
             }
-            if (statusText) statusText.innerText = 'Error: Memory Missing';
-            // Enable button to show error message on click
-            if (activeBtn) activeBtn.disabled = false;
-        });
+        }, 500);
+
+    } else {
+        // NORMAL MODE: Fetch full memory
+        fetch('memory.json')
+            .then(response => {
+                if (!response.ok) throw new Error("Failed to load memory bank");
+                return response.json();
+            })
+            .then(data => {
+                logToTerminal("Memory bank loaded successfully.", "success");
+                setTimeout(() => {
+                    if (window.GuahhEngine) {
+                        GuahhEngine.init(data, logToTerminal);
+                        if (statusText) statusText.innerText = 'Guahh AI One (a)';
+                    }
+                }, 300);
+            })
+            .catch(err => {
+                console.error(err);
+                logToTerminal("CRITICAL: Failed to load memory.json.", "error");
+                if (statusText) statusText.innerText = 'Error: Memory Missing';
+                if (activeBtn) activeBtn.disabled = false;
+            });
+    }
 });
 
 // Feedback Logging (Simplified)
