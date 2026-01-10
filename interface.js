@@ -3,46 +3,171 @@
  * Wires the Chat and Log panels to the Engine.
  */
 
-// Feedback Collection
+// Global State
+let activeChat, activeInput, activeBtn, logView, statusText;
+let lastUserQuery = '';
 const feedbackData = [];
+
+// Make globally available for HTML onclick
+window.sendMessage = async function () {
+    console.log("sendMessage called");
+    if (!activeInput) {
+        // Fallback or initialization check
+        console.error("Interface not initialized");
+        return;
+    }
+
+    const text = activeInput.value.trim();
+    if (!text) return;
+
+    lastUserQuery = text;
+    activeInput.value = '';
+    activeInput.style.height = 'auto';
+    activeBtn.disabled = true;
+
+    // User msg
+    addMessage(text, true);
+
+    // Thought simulation delay
+    await new Promise(r => setTimeout(r, 600));
+
+    // Generate
+    if (typeof GuahhEngine === 'undefined' || !GuahhEngine.isReady) {
+        console.warn("Engine not ready, attempting fallback...");
+        // If engine isn't ready (fetch blocked), respond accordingly
+        addMessage("System Error: Neural Core not active. (Are you running this from a local file?)", false);
+        activeBtn.disabled = false;
+        return;
+    }
+
+    const result = await GuahhEngine.generateResponse(text);
+
+    // Render AI Msg with feedback buttons
+    const aiMessageElement = addMessage(result.text, false);
+    addFeedbackButtons(aiMessageElement, lastUserQuery, result.text);
+
+    activeBtn.disabled = false;
+};
+
+// Helper Functions
+function addMessage(text, isUser) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${isUser ? 'user' : 'ai'}`;
+
+    if (!isUser) {
+        msgDiv.innerHTML = `
+            <div class="message-label">Guahh AI One (a)</div>
+            <div class="message-content"></div>
+        `;
+        const contentDiv = msgDiv.querySelector('.message-content');
+        typeWriter(contentDiv, text);
+    } else {
+        msgDiv.innerHTML = `
+            <div class="message-label">You</div>
+            <div class="message-content">${text}</div>
+        `;
+    }
+
+    if (activeChat) {
+        activeChat.appendChild(msgDiv);
+        activeChat.scrollTop = activeChat.scrollHeight;
+    }
+    return msgDiv;
+}
+
+function typeWriter(element, text) {
+    let i = 0;
+    const speed = 10;
+    function type() {
+        if (i < text.length) {
+            const char = text.charAt(i);
+            element.innerHTML += (char === '\n') ? '<br>' : char;
+            i++;
+            if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
+            setTimeout(type, speed);
+        } else {
+            element.innerHTML = formatMarkdown(text);
+            if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
+        }
+    }
+    type();
+}
+
+function formatMarkdown(text) {
+    return text.replace(/\n\n/g, '<br><br>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+}
+
+function addFeedbackButtons(messageElement, query, response) {
+    const feedbackDiv = document.createElement('div');
+    feedbackDiv.className = 'feedback-buttons';
+
+    // ... (Feedback button logic remains the same but concise for now)
+    const goodBtn = createBtn('👍', 'Good');
+    const badBtn = createBtn('👎', 'Bad');
+
+    goodBtn.onclick = () => handleFeedback(goodBtn, badBtn, query, response, 'good');
+    badBtn.onclick = () => handleFeedback(badBtn, goodBtn, query, response, 'bad');
+
+    feedbackDiv.appendChild(goodBtn);
+    feedbackDiv.appendChild(badBtn);
+    messageElement.appendChild(feedbackDiv);
+}
+
+function createBtn(icon, text) {
+    const btn = document.createElement('button');
+    btn.className = 'feedback-btn';
+    btn.innerHTML = `<span>${icon}</span> ${text}`;
+    return btn;
+}
+
+function handleFeedback(clickedBtn, otherBtn, query, response, rating) {
+    logFeedback(query, response, rating);
+    clickedBtn.classList.add('selected');
+    clickedBtn.classList.add(rating); // Add class for specific styling
+    otherBtn.disabled = true;
+    clickedBtn.disabled = true;
+    otherBtn.style.opacity = '0.3';
+}
+
+function logToTerminal(msg, type = "info") {
+    if (!logView) return;
+    const div = document.createElement('div');
+    div.className = `log-entry ${type}`;
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    div.innerHTML = `<span style="opacity:0.5">[${time}]</span> ${msg}`;
+    logView.appendChild(div);
+    logView.scrollTop = logView.scrollHeight;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     // Refs
-    const chatView = document.getElementById('chat-viewport');
-    const chatArea = document.getElementById('chatArea'); // NEW: for new UI
-    const logView = document.getElementById('neural-log');
-    const input = document.getElementById('user-input');
-    const userInput = document.getElementById('userInput'); // NEW: for new UI
-    const btn = document.getElementById('send-btn');
-    const sendBtn = document.getElementById('sendBtn'); // NEW: for new UI
-    const statusText = document.getElementById('status-text');
+    activeChat = document.getElementById('chatArea') || document.getElementById('chat-viewport');
+    logView = document.getElementById('neural-log');
+    activeInput = document.getElementById('userInput') || document.getElementById('user-input');
+    activeBtn = document.getElementById('sendBtn') || document.getElementById('send-btn');
+    statusText = document.getElementById('status-text');
 
-    // Use new elements if they exist, otherwise fall back
-    const activeChat = chatArea || chatView;
-    const activeInput = userInput || input;
-    const activeBtn = sendBtn || btn;
-
-    // Logging Bridge
-    function logToTerminal(msg, type = "info") {
-        const div = document.createElement('div');
-        div.className = `log-entry ${type}`;
-        // Timestamp
-        const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        div.innerHTML = `<span style="opacity:0.5">[${time}]</span> ${msg}`;
-        logView.appendChild(div);
-        logView.scrollTop = logView.scrollHeight;
-    }
-
-    // Auto-resize textarea
     if (activeInput) {
         activeInput.addEventListener('input', function () {
             this.style.height = 'auto';
             this.style.height = (this.scrollHeight) + 'px';
         });
+        // Keydown listener
+        activeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                window.sendMessage();
+            }
+        });
+    }
+
+    // Button listener (Backup if HTML onclick missing)
+    if (activeBtn) {
+        activeBtn.addEventListener('click', window.sendMessage);
     }
 
     // Boot Sequence
-    statusText.innerText = 'Initializing Neural Core...'; // Update UI
+    if (statusText) statusText.innerText = 'Initializing Neural Core...';
 
     fetch('memory.json')
         .then(response => {
@@ -52,222 +177,28 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
             logToTerminal("Memory bank loaded successfully.", "success");
             setTimeout(() => {
-                GuahhEngine.init(data, logToTerminal); // Pass custom logger
-                statusText.innerText = 'Guahh AI One (a)'; // Reset status
+                if (window.GuahhEngine) {
+                    GuahhEngine.init(data, logToTerminal);
+                    if (statusText) statusText.innerText = 'Guahh AI One (a)';
+                }
             }, 300);
         })
         .catch(err => {
             console.error(err);
-            logToTerminal("CRITICAL: Failed to load memory.json. Is the file missing?", "error");
-            statusText.innerText = 'Error: Memory Missing';
-        });
-
-    // Messaging
-    let lastUserQuery = '';
-    async function sendMessage() {
-        const text = activeInput.value.trim();
-        if (!text) return;
-
-        lastUserQuery = text;
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        activeBtn.disabled = true;
-
-        // User msg
-        addMessage(text, true);
-
-        // Thought simulation delay
-        await new Promise(r => setTimeout(r, 600));
-
-        // Generate (NOW ASYNC!)
-        const result = await GuahhEngine.generateResponse(text);
-
-        // Render AI Msg with feedback buttons
-        const aiMessageElement = addMessage(result.text, false);
-        addFeedbackButtons(aiMessageElement, lastUserQuery, result.text);
-
-        activeBtn.disabled = false;
-    }
-
-    function addMessage(text, isUser) {
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${isUser ? 'user' : 'ai'}`;
-
-        if (!isUser) {
-            // AI message with typing output
-            msgDiv.innerHTML = `
-                <div class="message-label">Guahh AI One (a)</div>
-                <div class="message-content"></div>
-            `;
-            const contentDiv = msgDiv.querySelector('.message-content');
-
-            // Start typing effect
-            typeWriter(contentDiv, text);
-
-        } else {
-            // User message (instant)
-            msgDiv.innerHTML = `
-                <div class="message-label">You</div>
-                <div class="message-content">${text}</div>
-            `;
-        }
-
-        activeChat.appendChild(msgDiv);
-        activeChat.scrollTop = activeChat.scrollHeight;
-
-        return msgDiv;
-    }
-
-    /**
-     * Typewriter Effect
-     */
-    function typeWriter(element, text) {
-        let i = 0;
-        const speed = 10; // ms per char
-
-        function type() {
-            if (i < text.length) {
-                // Handle newlines safely
-                const char = text.charAt(i);
-                if (char === '\n') {
-                    element.innerHTML += '<br>';
-                } else {
-                    element.innerHTML += char;
-                }
-
-                i++;
-                // Auto-scroll
-                activeChat.scrollTop = activeChat.scrollHeight;
-
-                setTimeout(type, speed);
-            } else {
-                // Done typing: Apply Markdown formatting
-                element.innerHTML = formatMarkdown(text);
-                activeChat.scrollTop = activeChat.scrollHeight;
+            logToTerminal("CRITICAL: Failed to load memory.json.", "error");
+            if (window.location.protocol === 'file:') {
+                logToTerminal("ERROR: Browsers block reading files directly (CORS). Please invoke Guahh using a local web server.", "error");
             }
-        }
-        type();
-    }
-
-    // Add feedback buttons to AI message
-    function addFeedbackButtons(messageElement, query, response) {
-        const feedbackDiv = document.createElement('div');
-        feedbackDiv.className = 'feedback-buttons';
-
-        const goodBtn = document.createElement('button');
-        goodBtn.className = 'feedback-btn good';
-        goodBtn.innerHTML = '<span>👍</span> Good';
-        goodBtn.title = 'Good response';
-
-        const badBtn = document.createElement('button');
-        badBtn.className = 'feedback-btn bad';
-        badBtn.innerHTML = '<span>👎</span> Bad';
-        badBtn.title = 'Bad response';
-
-        goodBtn.onclick = () => {
-            logFeedback(query, response, 'good');
-            goodBtn.classList.add('selected');
-            badBtn.disabled = true;
-            goodBtn.disabled = true;
-            badBtn.style.opacity = '0.3';
-        };
-
-        badBtn.onclick = () => {
-            logFeedback(query, response, 'bad');
-            badBtn.classList.add('selected');
-            goodBtn.disabled = true;
-            badBtn.disabled = true;
-            goodBtn.style.opacity = '0.3';
-        };
-
-        feedbackDiv.appendChild(goodBtn);
-        feedbackDiv.appendChild(badBtn);
-        messageElement.appendChild(feedbackDiv);
-    }
-
-    function formatMarkdown(text) {
-        return text
-            .replace(/\n\n/g, '<br><br>')
-            .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-    }
-
-    /**
-     * Feedback Logging System
-     */
-    function logFeedback(query, response, rating) {
-        const feedback = {
-            timestamp: new Date().toISOString(),
-            query: query,
-            response: response,
-            rating: rating,
-            id: feedbackData.length + 1 // Keep original ID logic
-        };
-
-        feedbackData.push(feedback);
-
-        // Styled console output
-        const style = rating === 'good' ? 'color: #10b981; font-weight: bold' : 'color: #ef4444; font-weight: bold';
-        console.group(`%c📊 FEEDBACK #${feedbackData.length} - ${rating.toUpperCase()}`, style);
-        console.log(`%c⏰ Timestamp:`, 'font-weight: bold;', feedback.timestamp);
-        console.log(`%c❓ User Query:`, 'font-weight: bold;', query);
-        console.log(`%c🤖 AI Response:`, 'font-weight: bold;', response);
-        console.log(`%c⭐ Rating:`, 'font-weight: bold;', rating);
-        console.groupEnd();
-
-        // Also log a copy/paste friendly version
-        console.log(
-            `\n━━━ FEEDBACK DATA ━━━\n` +
-            `ID: ${feedback.id}\n` + // Use feedback.id for consistency
-            `Time: ${feedback.timestamp}\n` +
-            `Query: ${query}\n` +
-            `Response: ${response}\n` +
-            `Rating: ${rating}\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n`
-        );
-
-        // Make export function available globally
-        window.exportFeedback = exportFeedback;
-
-        // Notify user
-        console.log('%c💡 TIP: Call exportFeedback() to get all feedback as JSON', 'color: #60a5fa; font-style: italic;');
-    }
-
-    function exportFeedback() {
-        if (feedbackData.length === 0) {
-            console.warn('No feedback data collected yet.');
-            return null;
-        }
-
-        const jsonStr = JSON.stringify(feedbackData, null, 2);
-        console.log('\n📦 EXPORTED FEEDBACK DATA:\n');
-        console.log(jsonStr);
-        console.log('\n✅ Copy the JSON above to share with your AI developer!\n');
-
-        return feedbackData;
-    }
-
-
-    // Event listeners
-    if (activeBtn) {
-        activeBtn.addEventListener('click', sendMessage);
-    }
-    if (activeInput) {
-        activeInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
+            if (statusText) statusText.innerText = 'Error: Memory Missing';
+            // Enable button to show error message on click
+            if (activeBtn) activeBtn.disabled = false;
         });
-    }
-
-    // Direct references for old code that might still use them
-    if (btn) btn.addEventListener('click', sendMessage);
-    if (input) {
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-    }
 });
+
+// Feedback Logging (Simplified)
+function logFeedback(query, response, rating) {
+    const feedback = { timestamp: new Date().toISOString(), query, response, rating };
+    feedbackData.push(feedback);
+    console.log(`FEEDBACK: ${rating}`, feedback);
+    window.exportFeedback = () => console.log(JSON.stringify(feedbackData, null, 2));
+}

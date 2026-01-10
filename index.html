@@ -16,8 +16,8 @@
             <div class="header-content">
                 <img src="https://raw.githubusercontent.com/guahhinc/guahh/main/guahhai.png" alt="Guahh AI Logo"
                     height="32" style="margin-right: 8px;">
-                <h1>Guahh AI One</h1>
-                <span class="version-badge">(a)</span>
+                <h1>Guahh AI One (a)</h1>
+                <span class="version-badge">BETA</span>
             </div>
         </header>
 
@@ -31,8 +31,9 @@
 
         <!-- Input Area -->
         <div class="input-container">
-            <textarea id="userInput" placeholder="Message Guahh AI..." rows="1"></textarea>
-            <button id="sendBtn">
+            <textarea id="userInput" placeholder="Message Guahh AI..." rows="1"
+                onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); window.sendMessage(); }"></textarea>
+            <button id="sendBtn" onclick="window.sendMessage()">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
                 </svg>
