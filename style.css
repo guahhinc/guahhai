@@ -320,6 +320,8 @@ body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    height: 100vh;
+    position: relative;
     transition: transform 0.3s ease;
 }
 
@@ -456,6 +458,7 @@ body {
     height: 44px;
     border-radius: 0.75rem;
     display: none;
+    /* Hidden by default, shown on mobile only */
     align-items: center;
     justify-content: center;
     cursor: pointer;
@@ -515,6 +518,7 @@ body {
         z-index: 1000;
         transform: translateX(-100%);
         box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+        width: 280px;
     }
 
     /* Show sidebar when active */
@@ -532,7 +536,7 @@ body {
         width: 100%;
     }
 
-    /* Adjust header padding for toggle button */
+    /* Adjust header padding for toggle button on mobile */
     .chat-header {
         padding-left: 4rem;
     }
