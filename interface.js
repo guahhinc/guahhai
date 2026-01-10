@@ -8,11 +8,17 @@ let activeChat, activeInput, activeBtn, logView, statusText;
 let lastUserQuery = '';
 const feedbackData = [];
 
+// Fallback dictionary
+const localFallbackMemory = [
+    { q: "hi", a: "Hello! I am Guahh AI 1 (a). I'm running in Local Mode. My deep memory is offline, but I can still answer math questions and search Wikipedia! Try asking 'What is an apple?'", tokens: ["hi"] },
+    { q: "hello", a: "Hello! I am Guahh AI 1 (a). I'm running in Local Mode. My deep memory is offline, but I can still answer math questions and search Wikipedia! Try asking 'What is an apple?'", tokens: ["hello"] },
+    { q: "who are you", a: "I am Guahh AI 1 (a).", tokens: ["who", "are", "you"] }
+];
+
 // Make globally available for HTML onclick
 window.sendMessage = async function () {
     console.log("sendMessage called");
     if (!activeInput) {
-        // Fallback or initialization check
         console.error("Interface not initialized");
         return;
     }
@@ -32,10 +38,22 @@ window.sendMessage = async function () {
     await new Promise(r => setTimeout(r, 600));
 
     // Generate
-    if (typeof GuahhEngine === 'undefined' || !GuahhEngine.isReady) {
-        console.warn("Engine not ready, attempting fallback...");
-        // If engine isn't ready (fetch blocked), respond accordingly
-        addMessage("System Error: Neural Core not active. (Are you running this from a local file?)", false);
+    if (typeof GuahhEngine === 'undefined') {
+        addMessage("System Error: Neural Engine not loaded.", false);
+        activeBtn.disabled = false;
+        return;
+    }
+
+    // Lazy Init fallback if not ready
+    if (!GuahhEngine.isReady) {
+        console.warn("Engine not ready, forcing fallback init...");
+        GuahhEngine.init(localFallbackMemory, logToTerminal);
+        if (statusText) statusText.innerText = 'Guahh AI 1 (a) (Local)';
+    }
+
+    if (!GuahhEngine.isReady) {
+        // If STILL not ready
+        addMessage("System Error: Neural Core failed to initialize.", false);
         activeBtn.disabled = false;
         return;
     }
@@ -170,11 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (statusText) statusText.innerText = 'Initializing Neural Core...';
 
     // Fallback dictionary for local mode
-    const localFallbackMemory = [
-        { q: "hi", a: "Hello! I am running in Local Mode. My full memory is disabled because browsers block file reading for security. To unlock my full brain, please open this folder with a Local Server (like VS Code Live Server) or upload me to GitHub!", tokens: ["hi"] },
-        { q: "hello", a: "Hello! I am running in Local Mode. My full memory is disabled because browsers block file reading for security. To unlock my full brain, please open this folder with a Local Server (like VS Code Live Server) or upload me to GitHub!", tokens: ["hello"] },
-        { q: "who are you", a: "I am Guahh AI One (a). I am currently operating in restricted Local Mode.", tokens: ["who", "are", "you"] }
-    ];
+    // (Moved to global scope)
 
     const isLocal = window.location.protocol === 'file:';
 
