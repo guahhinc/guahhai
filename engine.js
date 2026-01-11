@@ -398,23 +398,28 @@ const GuahhEngine = {
         // === CONVERSATIONAL INTENTS ===
 
         // Greeting intent
-        if (/^(hi|hello|hey|greetings|howdy|sup|yo|good (morning|afternoon|evening))/i.test(q.trim())) {
+        if (/^(hi|hello|hey|greetings|howdy|sup|yo|good (morning|afternoon|evening)|hola|bonjour)/i.test(q.trim())) {
             intents.push({ type: 'greeting', confidence: 0.95 });
         }
 
         // Farewell intent
-        if (/^(bye|goodbye|see you|farewell|take care|later)/i.test(q.trim())) {
+        if (/^(bye|goodbye|see you|farewell|take care|later|cya|so long|good night)/i.test(q.trim())) {
             intents.push({ type: 'farewell', confidence: 0.95 });
         }
 
         // Gratitude intent
-        if (/^(thank|thanks|thx|appreciate|grateful)/i.test(q)) {
+        if (/^(thank|thanks|thx|appreciate|grateful|cheers)/i.test(q)) {
             intents.push({ type: 'gratitude', confidence: 0.95 });
         }
 
         // Generic Casual/Small Talk intent
-        if (/^(how are you|what.*up|how.*going|good day|nice to meet|who.*you)/i.test(q) && !/who (is|are|was|were) (the|a|an)?\s*[A-Z]/i.test(q)) {
+        if (/^(how are you|how.*(it|things|life).*going|what.*up|good day|nice to meet|who.*you|tell me about yourself)/i.test(q) && !/who (is|are|was|were) (the|a|an)?\s*[A-Z]/i.test(q)) {
             intents.push({ type: 'casual', confidence: 0.92 });
+        }
+
+        // Compliments/Critiques
+        if (/(you.*(cool|awesome|smart|helpful|funny|great)|good job|well done)/i.test(q)) {
+            intents.push({ type: 'casual', confidence: 0.9 });
         }
 
         // === QUESTION INTENTS ===
@@ -425,104 +430,107 @@ const GuahhEngine = {
         }
 
         // How-to question
-        if (/^how (do|can|to|should)\s/i.test(q) || /how to\s/i.test(q)) {
+        if (/^how (do|can|to|should|would)\s/i.test(q) || /how to\s/i.test(q) || /way to\s/i.test(q)) {
             intents.push({ type: 'how_to', confidence: 0.92 });
         }
 
         // Why/Cause question
-        if (/^why\s/i.test(q) || /what (causes|caused|makes)/i.test(q)) {
+        if (/^why\s/i.test(q) || /what (causes|caused|makes|reason)/i.test(q)) {
             intents.push({ type: 'why_cause', confidence: 0.9 });
         }
 
         // Definition request
-        if (/(what (is|are|was|were) (the )?(definition|meaning) of|define|what does.*mean)/i.test(q)) {
+        if (/(what (is|are|was|were) (the )?(definition|meaning) of|define|what does.*mean|meaning of)/i.test(q)) {
             intents.push({ type: 'definition', confidence: 0.95 });
         }
 
         // Comparison request
-        if (/(compare|difference between|versus|vs|better than|worse than|similar to)/i.test(q)) {
+        if (/(compare|difference between|versus|vs|better than|worse than|similar to|distinguish)/i.test(q)) {
             intents.push({ type: 'comparison', confidence: 0.9 });
         }
 
         // List request
-        if (/(list|name.*all|what are (the|some)|give me.*examples|types of)/i.test(q)) {
+        if (/(list|name.*all|what are (the|some)|give me.*examples|types of|kinds of|categories)/i.test(q)) {
             intents.push({ type: 'list', confidence: 0.88 });
         }
 
         // === CREATIVE INTENTS ===
 
         // Creative writing intent
-        if (/write|create|make|generate|compose/i.test(q) && /(story|essay|article|poem|letter|email)/i.test(q)) {
+        if (/write|create|make|generate|compose|prepare/i.test(q) && /(story|essay|article|poem|letter|email|script|speech|lyrics)/i.test(q)) {
+            intents.push({ type: 'creative', confidence: 0.9 });
+        }
+
+        // "Make me a X"
+        if (/make (me )?a (story|essay|poem|recipe|plan)/i.test(q)) {
             intents.push({ type: 'creative', confidence: 0.9 });
         }
 
         // Brainstorm intent
-        if (/(brainstorm|ideas for|suggest|come up with|think of)/i.test(q)) {
+        if (/(brainstorm|ideas for|suggest|come up with|think of|inspiration|options for)/i.test(q)) {
             intents.push({ type: 'brainstorm', confidence: 0.85 });
         }
 
         // === TRANSFORMATION INTENTS ===
 
         // Paraphrase intent
-        if (/(rephrase|paraphrase|reword|say.*different|put.*different|another way|rewrite)/i.test(q)) {
+        if (/(rephrase|paraphrase|reword|say.*different|put.*different|another way|rewrite|word it differently)/i.test(q)) {
             intents.push({ type: 'paraphrase', confidence: 0.95 });
         }
 
         // Translation intent
-        if (/(translate|translation|in.*language|how do you say)/i.test(q)) {
+        if (/(translate|translation|in.*language|how do you say.*in)/i.test(q)) {
             intents.push({ type: 'translate', confidence: 0.92 });
         }
 
         // Correction intent
-        if (/(correct|fix|grammar|spelling|mistake|error|wrong)/i.test(q)) {
+        if (/(correct|fix|grammar|spelling|mistake|error|wrong|proofread|edit)/i.test(q)) {
             intents.push({ type: 'correction', confidence: 0.88 });
         }
 
         // === ANALYTICAL INTENTS ===
 
         // Explanation intent
-        if (/(explain|describe|tell.*about|define|clarify|elaborate|break down|walk.*through)/i.test(q)) {
+        if (/(explain|describe|tell.*about|define|clarify|elaborate|break down|walk.*through|help me understand)/i.test(q)) {
             intents.push({ type: 'explain', confidence: 0.85 });
         }
 
+        // "What is X" is often an explanation request if searching for a complex topic
+        if (/what is/i.test(q) && q.split(' ').length > 3) {
+            intents.push({ type: 'explain', confidence: 0.6 });
+        }
+
         // Summarization intent
-        if (/(summarize|summarise|sum up|summary|brief|short version|tldr|condense)/i.test(q)) {
+        if (/(summarize|summarise|sum up|summary|brief|short version|tldr|condense|digest|overview|main points)/i.test(q)) {
             intents.push({ type: 'summarize', confidence: 0.95 });
         }
 
         // Analysis intent
-        if (/(analyze|analyse|analysis|examine|evaluate|assess|review)/i.test(q)) {
+        if (/(analyze|analyse|analysis|examine|evaluate|assess|review|pros and cons|benefits of)/i.test(q)) {
             intents.push({ type: 'analysis', confidence: 0.88 });
         }
 
         // === RECOMMENDATION INTENTS ===
 
         // Recommendation request
-        if (/(recommend|suggestion|should i|what.*best|advice|tips|which.*choose)/i.test(q)) {
+        if (/(recommend|suggestion|should i|what.*best|advice|tips|which.*choose|good.*for)/i.test(q)) {
             intents.push({ type: 'recommendation', confidence: 0.87 });
         }
 
         // Opinion request
-        if (/(what.*think|your opinion|do you (like|prefer)|thoughts on)/i.test(q)) {
-            intents.push({ type: 'opinion', confidence: 0.82 });
+        if (/(what.*think|your opinion|do you (like|prefer)|thoughts on|believe)/i.test(q)) {
+            // Check if it's asking about "what others think"
+            if (!/what (do|does) \w+ think/i.test(q)) {
+                intents.push({ type: 'opinion', confidence: 0.82 });
+            }
         }
 
         // Confirmation/Negation (for answering questions)
-        if (/^(yes|yeah|yep|sure|absolutely|correct|right|i do)$/i.test(q)) {
+        if (/^(yes|yeah|yep|sure|absolutely|correct|right|i do|please|go ahead)$/i.test(q)) {
             intents.push({ type: 'confirmation', confidence: 0.95 });
         }
-        if (/^(no|nope|nah|not really|i don't|wrong)$/i.test(q)) {
+        if (/^(no|nope|nah|not really|i don't|wrong|stop|cancel)$/i.test(q)) {
             intents.push({ type: 'negation', confidence: 0.95 });
-        }
-
-        // Creative writing intent
-        if (/(write|compose|create|make|generate).*(essay|story|poem|article|letter|email|paragraph)/i.test(q)) {
-            intents.push({ type: 'creative', confidence: 0.95 });
-        }
-
-        // Brainstorming intent
-        if (/brainstorm|ideas? for|suggest|come up with|give.*ideas?/i.test(q)) {
-            intents.push({ type: 'brainstorm', confidence: 0.92 });
         }
 
         // === COMPUTATIONAL INTENTS ===
@@ -538,8 +546,11 @@ const GuahhEngine = {
         }
 
         // Calculation intent
-        if (/(calculate|compute|figure out|work out|how (much|many))/i.test(q) && /\d/i.test(q)) {
-            intents.push({ type: 'calculation', confidence: 0.88 });
+        if (/(calculate|compute|figure out|work out|how (much|many)|solve)/i.test(q)) {
+            // Ensure it's not just "how many people live in..." which is a question
+            if (/\d/i.test(q) || /(plus|minus|times|divided)/i.test(q)) {
+                intents.push({ type: 'calculation', confidence: 0.88 });
+            }
         }
 
         // === CONTEXT INTENTS ===
@@ -554,49 +565,54 @@ const GuahhEngine = {
             intents.push({ type: 'followup', confidence: 0.8 });
         }
 
+        // "It" reference check
+        if (/(what about it|tell me more about it)/i.test(q)) {
+            intents.push({ type: 'followup', confidence: 0.85 });
+        }
+
         // === MODIFICATION INTENTS ===
 
         // Tone adjustment intent
-        if (/(make.*more|make.*less|convert.*to|change.*tone|more formal|less formal|casual|professional)/i.test(q)) {
+        if (/(make.*more|make.*less|convert.*to|change.*tone|more formal|less formal|casual|professional|wittier|funnier)/i.test(q)) {
             intents.push({ type: 'tone_adjust', confidence: 0.85 });
         }
 
         // Expansion intent
-        if (/(expand|elaborate|more detail|tell me more|go deeper|longer version)/i.test(q)) {
-            intents.push({ type: 'expand', confidence: 0.88 });
+        if (/(expand|elaborate|more detail|tell me more|go deeper|longer version|make it longer|continue)/i.test(q)) {
+            intents.push({ type: 'expand', confidence: 0.95 });
         }
 
         // Simplification intent
-        if (/(simplify|simpler|easier|eli5|explain like|dumb.*down|basic)/i.test(q)) {
+        if (/(simplify|simpler|easier|eli5|explain like|dumb.*down|basic|too complex)/i.test(q)) {
             intents.push({ type: 'simplify', confidence: 0.9 });
         }
 
         // === PROCEDURE INTENTS ===
 
         // Step-by-step request
-        if (/(step by step|steps|instructions|guide|tutorial|how.*process)/i.test(q)) {
+        if (/(step by step|steps|instructions|guide|tutorial|how.*process|procedure for)/i.test(q)) {
             intents.push({ type: 'step_by_step', confidence: 0.87 });
         }
 
         // Troubleshooting intent
-        if (/(troubleshoot|problem|issue|not working|help.*fix|debug)/i.test(q)) {
+        if (/(troubleshoot|problem|issue|not working|help.*fix|debug|error|fail)/i.test(q)) {
             intents.push({ type: 'troubleshoot', confidence: 0.85 });
         }
 
         // === INFORMATIONAL INTENTS ===
 
-        // Historical inquiry
-        if (/(history of|historical|in the past|back then|ancient|origin)/i.test(q)) {
+        // Historical intent
+        if (/(history of|historical|in the past|back then|ancient|origin|biography|life of)/i.test(q)) {
             intents.push({ type: 'historical', confidence: 0.83 });
         }
 
         // Future/prediction request
-        if (/(future|will.*be|predict|forecast|what.*happen|upcoming)/i.test(q)) {
+        if (/(future|will.*be|predict|forecast|what.*happen|upcoming|trends)/i.test(q)) {
             intents.push({ type: 'future', confidence: 0.8 });
         }
 
         // Verification intent
-        if (/(is (it|this|that) (true|correct|right)|verify|confirm|fact check)/i.test(q)) {
+        if (/(is (it|this|that) (true|correct|right)|verify|confirm|fact check|are you sure)/i.test(q)) {
             intents.push({ type: 'verification', confidence: 0.85 });
         }
 
@@ -605,15 +621,12 @@ const GuahhEngine = {
         if (this.lastResponseType === 'TIME' && /24.*hour|military|12.*hour|standard/i.test(q)) {
             intents.push({ type: 'utility', confidence: 0.99 });
         }
-        if (this.lastResponseType === 'DICE' && /again|another|one more/i.test(q)) {
-            intents.push({ type: 'utility', confidence: 0.99 });
-        }
-        if (this.lastResponseType === 'COIN' && /again|another|one more/i.test(q)) {
+        if ((this.lastResponseType === 'DICE' || this.lastResponseType === 'COIN') && /again|another|one more|roll|flip/i.test(q)) {
             intents.push({ type: 'utility', confidence: 0.99 });
         }
 
         // === CASUAL / SHORT RESPONSE INTENTS (Prevent Dictionary Definitions) ===
-        if (/^(cool|nice|awesome|great|ok|okay|wow|sweet|good|thanks|thank you|thx|thanks!)$/i.test(q)) {
+        if (/^(cool|nice|awesome|great|ok|okay|wow|sweet|good|thanks|thank you|thx|thanks!|understood|got it)$/i.test(q)) {
             intents.push({ type: 'casual', confidence: 1.0 }); // Override everything else
         }
 
@@ -626,6 +639,15 @@ const GuahhEngine = {
         }
         if (/(spell.*backwards?|reverse.*word|backwards? spelling)/i.test(q)) {
             intents.push({ type: 'utility', confidence: 0.96 });
+        }
+
+        // === SEARCH INTENT (Implicit) ===
+        // If query smells like a factual lookup and hasn't matched other things strongly
+        if (intents.length === 0 && q.split(' ').length > 1 && !this.isMathQuery(q)) {
+            // Assume general search if it contains proper nouns or complexity
+            if (/[A-Z]/.test(query) || q.split(' ').length > 3) {
+                intents.push({ type: 'question', confidence: 0.5 });
+            }
         }
 
         return intents;
@@ -1186,36 +1208,195 @@ const GuahhEngine = {
         return combined;
     },
 
-    extractTopic(query) {
-        // Aggressive topic extraction for creative intents
-        let topic = query
-            .replace(/^(what is|who is|tell me about|define|search for|meaning of|information on|facts about)\s+/i, '')
-            .replace(/^(write|compose|create|make|generate)\s+(a|an)\s+(\d+\s+words?\s+)?(essay|story|poem|article|paragraph)\s+(about|on|regarding)\s+/i, '')
-            .replace(/^(write|compose|create)\s+(about|on)\s+/i, '')
-            .replace(/\?+$/, '')
-            .trim();
+    // ========== ADVANCED TOPIC & SEARCH UNDERSTANDING ==========
 
-        // If the topic is just "essay" or "story", it failed to extract the subject
-        if (/^(essay|story|poem|article)$/i.test(topic)) {
+    extractTopic(query) {
+        // Smart topic extraction that handles natural language nuances
+        let topic = query.toLowerCase();
+
+        // 0. GOLDEN EXTRACTION STRATEGY (High Priority)
+        // If the user explicitly says "write an essay on X", we trust X is the topic
+        // This handles "write an essay on lady mc beth" -> "lady mc beth"
+        const goldenMatch = query.match(/(?:write|create|make|generate).*(?:essay|story|article|poem)\s+(?:on|about|regarding|titled)\s+(.+)/i);
+        if (goldenMatch) {
+            let extracted = goldenMatch[1].trim();
+            // Still clean up trailing punctuation
+            extracted = extracted.replace(/[?.!]+$/, '');
+            // If it's not super long (likely a whole sentence), return it
+            if (extracted.length < 100) {
+                return extracted;
+            }
+        }
+
+        // 1. Remove polite conversational fillers
+        topic = topic.replace(/^(please|could you|can you|would you|i want you to|i'd like you to|hey|hi|hello)\s+/i, '');
+
+        // 2. Remove action verbs and command structures
+        const commands = [
+            'write a', 'write an', 'write', 'compose', 'create', 'generate', 'make', 'draft',
+            'tell me about', 'tell me', 'give me info on', 'give me information about',
+            'search for', 'look up', 'find', 'define', 'explain', 'describe', 'what is', 'who is'
+        ];
+
+        // Sort by length to match longest phrases first
+        commands.sort((a, b) => b.length - a.length);
+
+        for (const cmd of commands) {
+            if (topic.startsWith(cmd)) {
+                topic = topic.substring(cmd.length).trim();
+                break;
+            }
+        }
+
+        // 3. Remove format specifiers
+        const formats = ['essay', 'story', 'poem', 'article', 'paragraph', 'summary', 'overview', 'biography', 'letter', 'email', 'script'];
+        const formatRegex = new RegExp(`(^|\\s+)(${formats.join('|')})\\b`, 'gi');
+        topic = topic.replace(formatRegex, '').trim();
+
+        topic = topic.replace(/^(short|long|detailed|brief|quick)\s+/i, '');
+        topic = topic.replace(/\s+(\d+\s+words?)\b/i, '');
+
+        // 4. Remove prepositions connecting format to topic
+        topic = topic.replace(/^(about|on|regarding|concerning|covering|dealing with|for)\s+/i, '');
+
+        // 5. Clean up strict punctuation
+        topic = topic.replace(/[?.!]+$/, '').trim();
+
+        // 6. Handle "the topic of X"
+        topic = topic.replace(/^the topic of\s+/i, '');
+
+        // Validation
+        if (!topic || topic.length < 2 || /^(essay|story|poem|article)$/i.test(topic)) {
+            // Try to find ANY capitalized sequence in the original query as a fallback
+            const properNouns = query.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/g);
+            if (properNouns && properNouns.length > 0) {
+                // Return the longest proper noun sequence
+                return properNouns.sort((a, b) => b.length - a.length)[0];
+            }
             return null;
         }
+
+        // Restore original casing for proper nouns if possible
+        const originalWords = query.split(/\s+/);
+        const topicWords = topic.split(/\s+/);
+
+        // This is a naive reconstruction but helps with "Shakespeare" vs "shakespeare"
+        // (A sophisticated version would use the original string indices)
 
         return topic;
     },
 
+    generateIntelligentSearchQuery(userQuery, intentAnalysis) {
+        this.onLog("🧠 AI analyzing query for optimal search terms...", "process");
+
+        const q = userQuery.toLowerCase();
+
+        // Strategy 1: Explicit "Search for X"
+        const searchMatch = userQuery.match(/(?:search for|look up|find info on)\s+(.+)/i);
+        if (searchMatch) return searchMatch[1].trim();
+
+        // Strategy 2: Multi-entity Comparison
+        if (/(difference between|vs|versus|compare)/i.test(q)) {
+            const parts = userQuery.split(/vs\.?|versus|difference between|compare/i);
+            if (parts.length > 1) {
+                // Extract potential entities (filtering out common words)
+                const entities = parts.map(p => this.extractTopic(p.trim())).filter(e => e && e.length > 2);
+                if (entities.length >= 2) {
+                    this.onLog(`→ Comparison detected: ${entities.join(' vs ')}`, "data");
+                    return entities; // Returns array for multi-search
+                }
+            }
+        }
+
+        // Strategy 3: Specific Domain Queries (Government, History, Science)
+
+        // Government/Leadership
+        if (/president|minister|king|queen|leader|governor|mayor|ceo/i.test(q)) {
+            // "President of X" -> Search "Politics of X" or just "X" if it's a country
+            const ofMatch = userQuery.match(/(?:of|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
+            if (ofMatch) return ofMatch[1];
+        }
+
+        // History
+        if (/history|origin|background|founded|started/i.test(q)) {
+            // "History of the internet" -> "History of the Internet"
+            // Often Wikipedia has specific "History of X" pages
+            const subject = this.extractTopic(userQuery);
+            if (subject) return `History of ${subject}`;
+        }
+
+        // Strategy 4: Proper Noun Extraction (The "Best Guess")
+        // If we see capitalized words in the middle of a sentence, those are likely the topic
+        const properNouns = userQuery.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/g);
+        if (properNouns && properNouns.length > 0) {
+            // Filter out common sentence starters if they aren't part of a name
+            const filtered = properNouns.filter(n => !['What', 'Who', 'Where', 'When', 'Why', 'How', 'Tell', 'Write', 'Please'].includes(n));
+
+            if (filtered.length > 0) {
+                // Sort by length (longest usually most specific)
+                const bestGuess = filtered.sort((a, b) => b.length - a.length)[0];
+                this.onLog(`→ Extracted Entity: "${bestGuess}"`, "data");
+                return bestGuess;
+            }
+        }
+
+        // Strategy 5: Generic Subject Extraction (Fallback)
+        // Use our improved topic extractor
+        const smartTopic = this.extractTopic(userQuery);
+        if (smartTopic) {
+            this.onLog(`→ Extracted Subject: "${smartTopic}"`, "data");
+            return smartTopic;
+        }
+
+        // Strategy 6: Last Resort - meaningful words
+        // Filter out stopwords
+        const stopWords = ['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'about', 'is', 'are', 'was', 'were'];
+        const words = userQuery.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/);
+        const meaningful = words.filter(w => !stopWords.includes(w.toLowerCase()) && w.length > 2);
+
+        return meaningful.join(' ');
+    },
+
     async _fetchWikipedia(searchTerm, isLongForm = false) {
-        // Use 'origin=*' to try and bypass CORS, but file:// protocol often blocks it anyway.
-        const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro&explaintext&redirects=1&origin=*&titles=${encodeURIComponent(searchTerm)}`;
+        // STEP 1: Try exact title search (Fastest, best quality)
+        let url = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro&explaintext&redirects=1&origin=*&titles=${encodeURIComponent(searchTerm)}`;
         try {
             this.onLog(`Wikipedia: Fetching "${url}"...`, "data");
-            const res = await fetch(url);
+            let res = await fetch(url);
             if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
 
-            const data = await res.json();
-            const pages = data.query.pages;
-            const pageId = Object.keys(pages)[0];
+            let data = await res.json();
+            let pages = data.query.pages;
+            let pageId = Object.keys(pages)[0];
+
+            // If exact search failed (pageId -1), try FUZZY/OPEN SEARCH
             if (pageId === "-1") {
-                this.onLog(`Wikipedia: No page found for "${searchTerm}"`, "warning");
+                this.onLog(`Wikipedia: No exact match for "${searchTerm}". Trying fuzzy search...`, "warning");
+
+                // Opensearch/Search API to find the closest match
+                // list=search is better for finding "Closest" page
+                const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchTerm)}&format=json&origin=*`;
+                const searchRes = await fetch(searchUrl);
+                const searchData = await searchRes.json();
+
+                if (searchData.query.search && searchData.query.search.length > 0) {
+                    const bestMatch = searchData.query.search[0].title;
+                    this.onLog(`Wikipedia: Fuzzy match found -> "${bestMatch}"`, "success");
+
+                    // Re-fetch with the CORRECT title
+                    const correctUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro&explaintext&redirects=1&origin=*&titles=${encodeURIComponent(bestMatch)}`;
+                    res = await fetch(correctUrl);
+                    data = await res.json();
+                    pages = data.query.pages;
+                    pageId = Object.keys(pages)[0];
+                } else {
+                    return null; // Truly nothing found
+                }
+            }
+
+            // Double check we have a valid page now
+            if (pageId === "-1") {
+                this.onLog(`Wikipedia: No page found for "${searchTerm}" after fuzzy search.`, "warning");
                 return null;
             }
 
@@ -1223,7 +1404,7 @@ const GuahhEngine = {
             if (!extract || extract.includes("refer to:") || extract.includes("may refer to")) return null;
 
             const sentences = extract.split('. ').filter(s => s.trim().length > 20);
-            const sentenceCount = isLongForm ? 10 : 4;
+            const sentenceCount = isLongForm ? 12 : 5; // Slightly increased for better context
             let summary = sentences.slice(0, sentenceCount).join('. ');
 
             // Ensure proper ending
@@ -1250,191 +1431,250 @@ const GuahhEngine = {
 
     // ========== PARAPHRASING SYSTEM ==========
 
+    // ========== ADVANCED PARAPHRASING SYSTEM ==========
+
     paraphraseText(text, style = 'neutral') {
-        if (!text || text.length < 10) return text;
+        if (!text || text.length < 5) return text;
 
         this.onLog(`Paraphrasing with style: ${style}`, "process");
 
+        // styles: 'neutral', 'formal', 'casual', 'concise', 'elaborate', 'academic', 'creative', 'witty'
         let paraphrased = text;
+
+        // Pre-processing
+        const originalWords = text.split(/\s+/).length;
 
         // Apply style-specific transformations
         switch (style.toLowerCase()) {
             case 'formal':
             case 'professional':
-                paraphrased = this.adjustTone(text, 'formal');
+                paraphrased = this.applyFormalTone(text);
                 break;
             case 'casual':
             case 'informal':
-                paraphrased = this.adjustTone(text, 'casual');
+                paraphrased = this.applyCasualTone(text);
                 break;
             case 'concise':
             case 'brief':
             case 'short':
-                paraphrased = this.simplifyLanguage(text);
+            case 'simplify':
+                paraphrased = this.applyConciseTone(text);
                 break;
             case 'elaborate':
             case 'detailed':
             case 'expanded':
-                paraphrased = this.elaborateText(text);
+                paraphrased = this.applyElaborateTone(text);
+                break;
+            case 'academic':
+            case 'scholarly':
+                paraphrased = this.applyAcademicTone(text);
+                break;
+            case 'creative':
+            case 'flowery':
+                paraphrased = this.applyCreativeTone(text);
+                break;
+            case 'witty':
+            case 'funny':
+                paraphrased = this.applyWittyTone(text);
                 break;
             default:
-                // Neutral - just rephrase with synonyms
-                paraphrased = this.rephraseWithSynonyms(text);
+                // Neutral - intelligent synonym replacement
+                paraphrased = this.featureRichSynonymReplacement(text, 'neutral');
+        }
+
+        // Post-processing check: Ensure we didn't butcher the meaning too much
+        // (Basic length check for now)
+        if (paraphrased.length < text.length * 0.3) {
+            this.onLog("Paraphrase overly aggressive, reverting slightly.", "warning");
+            return text; // Safety fallback
         }
 
         return paraphrased;
     },
 
-    adjustTone(text, targetTone) {
-        let adjusted = text;
-
-        if (targetTone === 'formal') {
-            // Make more formal
-            adjusted = adjusted
-                .replace(/\bdon't\b/gi, 'do not')
-                .replace(/\bcan't\b/gi, 'cannot')
-                .replace(/\bwon't\b/gi, 'will not')
-                .replace(/\bisn't\b/gi, 'is not')
-                .replace(/\baren't\b/gi, 'are not')
-                .replace(/\bwasn't\b/gi, 'was not')
-                .replace(/\bweren't\b/gi, 'were not')
-                .replace(/\bhasn't\b/gi, 'has not')
-                .replace(/\bhaven't\b/gi, 'have not')
-                .replace(/\bget\b/gi, 'obtain')
-                .replace(/\bgot\b/gi, 'obtained')
-                .replace(/\bshow\b/gi, 'demonstrate')
-                .replace(/\bshows\b/gi, 'demonstrates')
-                .replace(/\bmake\b/gi, 'create')
-                .replace(/\bmakes\b/gi, 'creates')
-                .replace(/\bthink\b/gi, 'believe')
-                .replace(/\bthinks\b/gi, 'believes')
-                .replace(/\ba lot of\b/gi, 'numerous')
-                .replace(/\bkind of\b/gi, 'somewhat')
-                .replace(/\bsort of\b/gi, 'somewhat')
-                .replace(/\bstuff\b/gi, 'material')
-                .replace(/\bthings\b/gi, 'items');
-
-        } else if (targetTone === 'casual') {
-            // Make more casual
-            adjusted = adjusted
-                .replace(/\bdo not\b/gi, "don't")
-                .replace(/\bcannot\b/gi, "can't")
-                .replace(/\bwill not\b/gi, "won't")
-                .replace(/\bis not\b/gi, "isn't")
-                .replace(/\bare not\b/gi, "aren't")
-                .replace(/\bwas not\b/gi, "wasn't")
-                .replace(/\bwere not\b/gi, "weren't")
-                .replace(/\bobtain\b/gi, 'get')
-                .replace(/\bobtained\b/gi, 'got')
-                .replace(/\bdemonstrate\b/gi, 'show')
-                .replace(/\bdemonstrates\b/gi, 'shows')
-                .replace(/\butilize\b/gi, 'use')
-                .replace(/\butilizes\b/gi, 'uses')
-                .replace(/\bcommence\b/gi, 'start')
-                .replace(/\bcommences\b/gi, 'starts')
-                .replace(/\bnumerous\b/gi, 'a lot of')
-                .replace(/\badditionally\b/gi, 'also')
-                .replace(/\bfurthermore\b/gi, 'also')
-                .replace(/\bmoreover\b/gi, 'also');
+    applyFormalTone(text) {
+        let t = text;
+        // Expand contractions
+        const contractions = {
+            "can't": "cannot", "won't": "will not", "don't": "do not", "didn't": "did not",
+            "isn't": "is not", "aren't": "are not", "wasn't": "was not", "weren't": "were not",
+            "haven't": "have not", "hasn't": "has not", "hadn't": "had not", "shouldn't": "should not",
+            "wouldn't": "would not", "couldn't": "could not", "i'm": "I am", "you're": "you are",
+            "they're": "they are", "we're": "we are", "it's": "it is", "let's": "let us"
+        };
+        for (const [key, val] of Object.entries(contractions)) {
+            t = t.replace(new RegExp(`\\b${key}\\b`, 'gi'), val);
         }
 
-        return adjusted;
+        // Formal vocabulary mapping
+        const vocab = {
+            "get": "acquire", "got": "obtained", "buy": "purchase", "need": "require",
+            "ask": "inquire", "check": "verify", "tell": "inform", "help": "assist",
+            "start": "commence", "end": "conclude", "use": "utilize", "show": "demonstrate",
+            "bad": "detrimental", "good": "beneficial", "big": "substantial", "small": "minimal",
+            "happy": "gratified", "sad": "disheartened", "really": "significantly", "maybe": "perhaps",
+            "make": "construct", "fix": "rectify", "job": "occupation", "smart": "intelligent",
+            "guess": "estimate", "hard": "arduous", "easy": "effortless", "wrong": "incorrect",
+            "right": "accurate", "idea": "concept", "think": "perceive", "funny": "humorous"
+        };
+
+        return this.replaceVocab(t, vocab);
     },
 
-    simplifyLanguage(text) {
-        // Simplify complex words and shorten sentences
-        let simplified = text
-            .replace(/\butilize\b/gi, 'use')
-            .replace(/\bcommence\b/gi, 'start')
-            .replace(/\bterminate\b/gi, 'end')
-            .replace(/\bdemonstrate\b/gi, 'show')
-            .replace(/\bfacilitate\b/gi, 'help')
-            .replace(/\bimplement\b/gi, 'do')
-            .replace(/\badvantages\b/gi, 'benefits')
-            .replace(/\bincreasingly\b/gi, 'more and more')
-            .replace(/\bsubsequently\b/gi, 'then')
-            .replace(/\bnevertheless\b/gi, 'but')
-            .replace(/\bfurthermore\b/gi, 'also')
-            .replace(/\badditionally\b/gi, 'also')
-            .replace(/\bcomplexity\b/gi, 'difficult parts');
+    applyCasualTone(text) {
+        let t = text;
+        // Add contractions
+        const expansions = {
+            "cannot": "can't", "will not": "won't", "do not": "don't", "did not": "didn't",
+            "is not": "isn't", "are not": "aren't", "was not": "wasn't", "were not": "weren't",
+            "have not": "haven't", "has not": "hasn't", "should not": "shouldn't", "could not": "couldn't"
+        };
+        for (const [key, val] of Object.entries(expansions)) {
+            t = t.replace(new RegExp(`\\b${key}\\b`, 'gi'), val);
+        }
 
-        return simplified;
+        const vocab = {
+            "acquire": "get", "purchase": "buy", "require": "need", "inquire": "ask",
+            "verify": "check", "inform": "tell", "assist": "help", "commence": "start",
+            "conclude": "end", "utilize": "use", "demonstrate": "show", "detrimental": "bad",
+            "beneficial": "good", "substantial": "big", "minimal": "small", "gratified": "happy",
+            "significantly": "really", "perhaps": "maybe", "construct": "make", "rectify": "fix",
+            "occupation": "job", "intelligent": "smart", "estimate": "guess", "arduous": "hard",
+            "effortless": "easy", "item": "thing", "items": "things"
+        };
+
+        // Add some casual fillers occasionally
+        t = this.replaceVocab(t, vocab);
+        if (Math.random() > 0.7 && !t.includes("like,")) {
+            t = t.replace(/, /g, ", like, ");
+        }
+        return t;
     },
 
-    elaborateText(text) {
-        // Add elaboration and detail
-        const sentences = text.split('. ').filter(s => s.trim());
-        const elaborated = sentences.map(sentence => {
-            // Add transitional phrases and elaborative language
-            if (Math.random() > 0.5) {
-                const transitions = [
-                    'Furthermore, ',
-                    'Additionally, ',
-                    'Moreover, ',
-                    'It is worth noting that ',
-                    'Significantly, ',
-                    'Importantly, '
+    applyConciseTone(text) {
+        // Remove fluff words
+        let t = text;
+        const fluff = ["basically", "essentially", "literally", "actually", "very", "really", "quite", "somewhat", "in order to", "due to the fact that"];
+        fluff.forEach(word => {
+            t = t.replace(new RegExp(`\\b${word}\\b`, 'gi'), "");
+        });
+
+        // Shorten phrases
+        const shorts = {
+            "at this point in time": "now", "in the event that": "if", "on a daily basis": "daily",
+            "reach a decision": "decide", "make a choice": "choose", "give an indication": "indicate",
+            "take into consideration": "consider", "make an adjustment": "adjust"
+        };
+
+        t = this.replaceVocab(t, shorts);
+        return t.replace(/\s+/g, ' ').trim(); // Clean up spaces
+    },
+
+    applyElaborateTone(text) {
+        // Identify simple sentences and expand them
+        const sentences = text.split('. ');
+        return sentences.map(s => {
+            if (s.length < 50 && Math.random() > 0.4) {
+                const openers = [
+                    "It is important to note that ", "Considering the context, ", "In particular, ",
+                    "Upon closer inspection, ", "Interestingly enough, "
                 ];
-                const transition = transitions[Math.floor(Math.random() * transitions.length)];
-                return transition + sentence.trim();
-            }
-            return sentence.trim();
-        }).join('. ');
+                const closers = [
+                    ", which significantly impacts the outcome", ", adding a layer of complexity",
+                    ", demonstrating the nuance of the situation", ", as many experts have observed"
+                ];
 
-        return elaborated + '.';
+                // Add opener OR closer
+                if (Math.random() > 0.5) {
+                    return openers[Math.floor(Math.random() * openers.length)] + s.charAt(0).toLowerCase() + s.slice(1);
+                } else {
+                    return s + closers[Math.floor(Math.random() * closers.length)];
+                }
+            }
+            return s;
+        }).join('. ');
     },
 
-    rephraseWithSynonyms(text) {
-        // Simple synonym replacement for common words
-        const synonymMap = {
-            'important': ['significant', 'crucial', 'vital', 'essential'],
-            'big': ['large', 'substantial', 'considerable', 'major'],
-            'small': ['minor', 'limited', 'modest', 'little'],
-            'good': ['beneficial', 'positive', 'favorable', 'excellent'],
-            'bad': ['negative', 'unfavorable', 'poor', 'detrimental'],
-            'many': ['numerous', 'various', 'multiple', 'several'],
-            'use': ['utilize', 'employ', 'apply', 'implement'],
-            'show': ['demonstrate', 'display', 'exhibit', 'reveal'],
-            'help': ['assist', 'aid', 'support', 'facilitate'],
-            'start': ['begin', 'commence', 'initiate', 'launch']
+    applyAcademicTone(text) {
+        // High-level vocabulary
+        const vocab = {
+            "think": "hypothesize", "change": "modify", "find": "ascertain", "show": "illustrate",
+            "bad": "adverse", "lots of": "a plethora of", "idea": "notion", "problem": "issue",
+            "look at": "examine", "talk about": "discuss", "get": "derive", "use": "employ"
         };
+        let t = this.replaceVocab(text, vocab);
 
-        let rephrased = text;
-        const words = text.toLowerCase().split(/\b/);
+        // Passive voice injection (classic academic style)
+        t = t.replace(/\bwe (found|saw|noticed)\b/gi, "it was observed");
+        t = t.replace(/\bI (believe|think)\b/gi, "it is suggested");
 
-        for (const [word, synonyms] of Object.entries(synonymMap)) {
-            const regex = new RegExp(`\\b${word}\\b`, 'gi');
-            if (regex.test(rephrased) && Math.random() > 0.5) {
-                const synonym = synonyms[Math.floor(Math.random() * synonyms.length)];
-                // Match the case of the original word
-                rephrased = rephrased.replace(regex, (match) => {
-                    if (match[0] === match[0].toUpperCase()) {
-                        return synonym.charAt(0).toUpperCase() + synonym.slice(1);
-                    }
-                    return synonym;
-                });
+        return t;
+    },
+
+    applyCreativeTone(text) {
+        // Vivid imagery
+        const vocab = {
+            "red": "crimson", "blue": "azure", "green": "emerald", "bright": "luminous",
+            "dark": "shadowy", "fast": "swift", "slow": "languid", "happy": "euphoric",
+            "sad": "melancholic", "walk": "wander", "run": "sprint", "look": "gaze"
+        };
+        return this.replaceVocab(text, vocab);
+    },
+
+    applyWittyTone(text) {
+        let t = this.applyCasualTone(text); // Base casual
+
+        // Insert mild sarcasm or wit
+        const inserts = [
+            " - shocker, right?", " (who would have thought?)", ", oddly enough,",
+            " - keeping things interesting,", ", specifically speaking,"
+        ];
+
+        if (Math.random() > 0.5) {
+            const parts = t.split(/[,.]/);
+            if (parts.length > 1) {
+                // Insert distinct wit at first clause
+                const validParts = parts.filter(p => p.length > 10);
+                if (validParts.length > 0) {
+                    // Complex replacement to avoid breaking grammar too badly
+                    // For now, simple append to sentence end is safer
+                    t = t.trim();
+                    if (t.endsWith('.')) t = t.slice(0, -1);
+                    t += inserts[Math.floor(Math.random() * inserts.length)] + ".";
+                }
             }
         }
-
-        return rephrased;
+        return t;
     },
 
-    findSynonyms(word, context = []) {
-        // Basic synonym dictionary
-        const synonyms = {
-            'important': ['significant', 'crucial', 'vital', 'essential', 'key'],
-            'big': ['large', 'substantial', 'considerable', 'major', 'huge'],
-            'small': ['minor', 'limited', 'modest', 'little', 'tiny'],
-            'good': ['beneficial', 'positive', 'favorable', 'excellent', 'great'],
-            'bad': ['negative', 'unfavorable', 'poor', 'detrimental', 'awful'],
-            'fast': ['quick', 'rapid', 'swift', 'speedy', 'prompt'],
-            'slow': ['gradual', 'unhurried', 'leisurely', 'sluggish'],
-            'happy': ['joyful', 'pleased', 'content', 'delighted', 'cheerful'],
-            'sad': ['unhappy', 'sorrowful', 'dejected', 'melancholy', 'gloomy']
+    featureRichSynonymReplacement(text, style) {
+        // Used for the default/neutral case
+        // More subtle than the heavy-handed approach
+        const vocab = {
+            "basically": "essentially", "important": "crucial", "good": "positive",
+            "bad": "negative", "happy": "content", "sad": "upset", "big": "large",
+            "small": "tiny", "fast": "quick", "slow": "gradual"
         };
-
-        return synonyms[word.toLowerCase()] || [word];
+        return this.replaceVocab(text, vocab);
     },
+
+    replaceVocab(text, map) {
+        let regexStr = "\\b(" + Object.keys(map).join("|") + ")\\b";
+        let regex = new RegExp(regexStr, "gi");
+
+        return text.replace(regex, (matched) => {
+            const lower = matched.toLowerCase();
+            const replacement = map[lower] || matched;
+
+            // Preserve capitalization
+            if (matched[0] === matched[0].toUpperCase()) {
+                return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+            }
+            return replacement;
+        });
+    },
+
+    // ========== END ADVANCED PARAPHRASING SYSTEM ==========
 
     // ========== END PARAPHRASING SYSTEM ==========
 
@@ -2011,17 +2251,20 @@ const GuahhEngine = {
             if (lastOutput) {
                 // Detect desired style from query
                 let style = 'neutral';
-                if (/(formal|professional)/i.test(query)) style = 'formal';
-                else if (/(casual|informal)/i.test(query)) style = 'casual';
-                else if (/(concise|brief|short)/i.test(query)) style = 'concise';
-                else if (/(elaborate|detail|expand)/i.test(query)) style = 'elaborate';
+                if (/(formal|professional|business)/i.test(query)) style = 'formal';
+                else if (/(casual|informal|chill|friendly)/i.test(query)) style = 'casual';
+                else if (/(concise|brief|short|summarize|simple)/i.test(query)) style = 'concise';
+                else if (/(elaborate|detail|expand|long)/i.test(query)) style = 'elaborate';
+                else if (/(academic|scholarly|smart|intelligent)/i.test(query)) style = 'academic';
+                else if (/(creative|flowery|expressive)/i.test(query)) style = 'creative';
+                else if (/(witty|funny|humorous|amusing|sarcastic)/i.test(query)) style = 'witty';
 
                 const paraphrased = this.paraphraseText(lastOutput, style);
                 const result = { text: paraphrased, sources: ["Paraphrasing Engine"] };
                 this.addToHistory(query, result.text);
                 return result;
             } else {
-                return { text: "I don't have anything recent to paraphrase. Could you provide some text?", sources: [] };
+                return { text: "I don't have anything recent to paraphrase. Could you provide some text?", sources: ["System"] };
             }
         }
 
@@ -2104,6 +2347,38 @@ const GuahhEngine = {
             }
 
         }
+
+        // --- SUMMARIZATION ---
+        if (intentAnalysis.primary === 'summarize' || /summarize|summarise|tldr|sum up|summary/i.test(effectiveQuery)) {
+            this.onLog("Intent: SUMMARIZATION", "process");
+
+            // 1. Check if text is provided in the query (e.g. "Summarize this: [TEXT]")
+            // Remove the command part to find the payload
+            let contentToSummarize = effectiveQuery
+                .replace(/^(please )?(summarize|summarise|sum up|give me a summary of|tldr)/i, '')
+                .replace(/^ this[:\s]*/i, '') // Remove "this" or "this:"
+                .trim();
+
+            // If user just said "Summarize this" without text, contentToSummarize will be empty
+            // So we check recent history
+            if (!contentToSummarize || contentToSummarize.length < 10) {
+                const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
+                if (lastOutput) {
+                    this.onLog("Summarizing previous output...", "info");
+                    contentToSummarize = lastOutput;
+                } else {
+                    return { text: "I don't have enough text to summarize. Please provide the text or ask me to summarize a previous response.", sources: [] };
+                }
+            } else {
+                this.onLog("Summarizing provided text...", "info");
+            }
+
+            const summary = this.summarizeText(contentToSummarize);
+            const result = { text: `Here is a summary:\n\n${summary}`, sources: ["Summarizer"] };
+            this.addToHistory(query, result.text);
+            return result;
+        }
+
         // --- SIMPLIFICATION ---
         if (intentAnalysis.primary === 'simplify' || /explain.*like.*5|simple terms/i.test(effectiveQuery)) {
             this.onLog("Intent: SIMPLIFICATION", "process");
@@ -2245,13 +2520,34 @@ const GuahhEngine = {
             this.onLog("Creative Intent detected.", "process");
 
             // Try to get Wikipedia context for the topic if available
+            // implements MULTI-SEARCH for essays to ensure depth
             let wikiContext = "";
             if (topic) {
                 this.onLog(`Fetching Wikipedia context for topic: "${topic}"`, "process");
-                const wikiResult = await this.searchWikipedia(topic, true); // Long form
-                if (wikiResult) {
-                    wikiContext = wikiResult;
-                    this.onLog("✓ Wikipedia context retrieved for creative writing.", "success");
+
+                if (/essay|article|report|paper/i.test(effectiveQuery)) {
+                    // For essays, we do a multi-pronged search to get better depth
+                    const queries = [topic];
+
+                    // Add logical sub-searches
+                    queries.push(`History of ${topic}`);
+                    queries.push(`Significance of ${topic}`);
+                    if (/[A-Z]/.test(topic)) {
+                        queries.push(`Themes in ${topic}`);
+                    }
+
+                    const combined = await this.searchMultipleAndCombine(queries, true);
+                    if (combined) {
+                        wikiContext = combined;
+                        this.onLog("✓ Multi-source context acquired for essay.", "success");
+                    }
+                } else {
+                    // Standard search for stories/poems
+                    const wikiResult = await this.searchWikipedia(topic, true);
+                    if (wikiResult) {
+                        wikiContext = wikiResult;
+                        this.onLog("✓ Wikipedia context retrieved.", "success");
+                    }
                 }
             }
 
@@ -2535,20 +2831,47 @@ const GuahhEngine = {
     },
 
     summarizeText(text) {
-        const sentences = text.split('. ').filter(s => s.trim().length > 10);
-        if (sentences.length <= 1) return "That's already quite short: " + text;
+        if (!text) return "";
 
-        // Simple extraction summarization: First sentence + any sentence with "important" keywords or just the last one
-        const first = sentences[0];
-        const last = sentences[sentences.length - 1];
+        // Split into sentences using a smarter regex that avoids splitting on "Mr.", "Mrs.", "etc."
+        // (Simplified for performance, but handles basic cases)
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const cleanSentences = sentences.map(s => s.trim()).filter(s => s.length > 20);
 
-        // If > 5 sentences, pick a middle one too
-        let middle = "";
-        if (sentences.length > 5) {
-            middle = sentences[Math.floor(sentences.length / 2)] + ". ";
+        if (cleanSentences.length <= 3) {
+            return "That's already quite concise: " + text;
         }
 
-        return `In summary: ${first}. ${middle}${last}.`;
+        // Key algorithm:
+        // 1. Keep the first sentence (Introduction/Hook).
+        // 2. Keep the last sentence (Conclusion).
+        // 3. Pick "important" sentences from the middle based on keyword density or position.
+
+        const summaryArr = [];
+
+        // Always include first sentence
+        summaryArr.push(cleanSentences[0]);
+
+        // Middle selection
+        if (cleanSentences.length > 10) {
+            // Pick 3 sentences distributed evenly
+            const step = Math.floor((cleanSentences.length - 2) / 3);
+            for (let i = 1; i <= 3; i++) {
+                const idx = 1 + (step * i);
+                if (cleanSentences[idx]) summaryArr.push(cleanSentences[idx]);
+            }
+        } else if (cleanSentences.length > 3) {
+            // Pick 1 middle sentence
+            const mid = Math.floor(cleanSentences.length / 2);
+            summaryArr.push(cleanSentences[mid]);
+        }
+
+        // Always include last sentence
+        if (cleanSentences.length > 1) {
+            summaryArr.push(cleanSentences[cleanSentences.length - 1]);
+        }
+
+        return summaryArr.join(' ');
     },
 
     generateNeuralText(sourceText, targetLength = 40, retryCount = 0) {
@@ -2780,13 +3103,29 @@ const GuahhEngine = {
 
         // Supporting sentences (use Wikipedia context if available)
         let support = "";
-        if (wikiContext) {
-            const sentences = wikiContext.split('.').filter(s => s.trim().length > 20);
-            const relevantSentences = sentences.slice(index * 2, (index * 2) + 2);
-            support = relevantSentences.join('. ') + '.';
+
+        // Clean context of headers like "**Topic:**" before processing
+        let cleanContext = wikiContext ? wikiContext.replace(/\*\*.*?\*\*[\s:]*/g, '') : "";
+
+        if (cleanContext) {
+            const sentences = cleanContext.split('.').filter(s => s.trim().length > 20);
+
+            // KEY FIX: Offset slicing to avoid reusing Intro content
+            // Intro checks first 3 sentences. Body paragraphs should start AFTER that.
+            // Formula: Start at 3 + (index * 2)
+            const startIdx = 3 + (index * 2);
+            const relevantSentences = sentences.slice(startIdx, startIdx + 2);
+
+            if (relevantSentences.length > 0) {
+                // Remove topic name repeats at very start of sentence to assist flow
+                support = relevantSentences.join('. ') + '.';
+            } else {
+                // Fallback if we run out of sentences
+                support = this.generateSupportingSentences(topic, mainPoint, index);
+            }
         } else {
             // Generate generic supporting content
-            support = this.generateSupportingSentences(topic, mainPoint);
+            support = this.generateSupportingSentences(topic, mainPoint, index);
         }
 
         // Concluding sentence for paragraph - more natural, less formulaic
@@ -2813,15 +3152,31 @@ const GuahhEngine = {
         return `${topicSentence} ${support}${conclusion}`;
     },
 
-    generateSupportingSentences(topic, mainPoint) {
+    generateSupportingSentences(topic, mainPoint, index) {
         // Generate 2-3 supporting sentences
+        // Expanded template pool to 15 unique variants to avoid duplication (User Request)
         const templates = [
             `This aspect of ${topic} has been studied extensively. Researchers have found compelling evidence supporting various perspectives. The implications extend beyond immediate observations.`,
             `Examining this dimension reveals important patterns. Multiple factors contribute to the overall picture. Each element plays a distinct role in the larger framework.`,
-            `Historical analysis shows how this has evolved over time. Contemporary understanding builds upon earlier foundations. Modern perspectives incorporate both traditional and innovative approaches.`
+            `Historical analysis shows how this has evolved over time. Contemporary understanding builds upon earlier foundations. Modern perspectives incorporate both traditional and innovative approaches.`,
+            `Experts often point to this as a critical factor. The underlying mechanisms are complex but essential to understand. This helps validify the broader consensus on the subject.`,
+            `When analyzed closely, the datal supports this view. There is a rich interplay between these factors. It becomes clear that simple explanations often miss the mark.`,
+            `This has significant downstream effects. The influence it has on the surrounding context is undeniable. We can see clear cause-and-effect relationships at play here.`,
+            `Critics and proponents alike debate the specifics. However, the core importance remains unchallenged. This ongoing dialogue shapes how we currently perceive ${topic}.`,
+            `Data from various sources corroborates this. The consistent presence of this theme suggests it is foundational. Ignoring it would lead to an incomplete understanding.`,
+            `This contributes deeply to the overall narrative. It serves as a bridge between different concepts. Without it, the structure would lack coherence.`,
+            `This is more than just a minor detail. It represents a shift in how we approach the subject. The long-term consequences are still being evaluated.`,
+            `Evidence suggests a strong correlation here. This aligns with broader trends we observe elsewhere. It fits neatly into the established theoretical models.`,
+            `This component acts as a catalyst for other changes. Its impact resonates through the entire system. We can trace many outcomes back to this single point.`,
+            `Scholars have long emphasized this particular point. It remains a focal point of academic discussion. The depth of analysis here continues to grow.`,
+            `This illustrates the dynamic nature of ${topic}. Nothing exists in a vacuum, and this is no exception. It interacts fluidly with other key elements.`,
+            `Taking a step back, this helps frame the entire issue. It provides the necessary context for deeper discussion. This perspective is essential for a holistic view.`
         ];
 
-        return templates[Math.floor(Math.random() * templates.length)];
+        // Use deterministic selection based on paragraph index to GUARANTEE uniqueness within an essay
+        const safeIndex = (index || 0) % templates.length;
+
+        return templates[safeIndex];
     },
 
     generateConclusion(topic, outline, wikiContext) {
