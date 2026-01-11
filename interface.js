@@ -200,9 +200,7 @@ function renderSessionList() {
     sessionList.querySelectorAll('.session-delete').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm('Delete this chat?')) {
-                deleteSession(btn.dataset.sessionId);
-            }
+            deleteSession(btn.dataset.sessionId);
         });
     });
 }
@@ -434,35 +432,8 @@ function handleFeedback(clickedBtn, otherBtn, query, response, rating) {
 
     // If negative feedback, show refinement options
     if (rating === 'bad') {
-        const feedbackContainer = clickedBtn.parentElement;
-        const refinements = document.createElement('div');
-        refinements.style.marginTop = '8px';
-        refinements.style.display = 'flex';
-        refinements.style.gap = '6px';
-        refinements.style.flexWrap = 'wrap';
-
-        const options = [
-            { id: 'too_simple', label: 'Too Simple' },
-            { id: 'too_complex', label: 'Too Complex' },
-            { id: 'inaccurate', label: 'Inaccurate' }
-        ];
-
-        options.forEach(opt => {
-            const btn = document.createElement('button');
-            btn.className = 'feedback-btn';
-            btn.style.fontSize = '0.75rem';
-            btn.innerText = opt.label;
-            btn.onclick = async () => {
-                // Disable all refinement buttons
-                Array.from(refinements.children).forEach(b => b.disabled = true);
-                btn.classList.add('selected');
-
-                await triggerRegeneration(query, opt.id, response);
-            };
-            refinements.appendChild(btn);
-        });
-
-        feedbackContainer.parentElement.appendChild(refinements);
+        console.log("Feedback logged: User disliked response");
+        // No more sub-options needed per user request
     }
 }
 

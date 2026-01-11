@@ -2025,59 +2025,53 @@ const GuahhEngine = {
         }
 
         // --- EXPANSION / TELL ME MORE ---
-        if (intentAnalysis.primary === 'expand' || /tell me more|more detail|go on|elaborate|continue|make.*longer|expand/i.test(effectiveQuery)) {
+        if (intentAnalysis.primary === 'expand' || /tell me more|more detail|go on|elaborate|continue|make.*longer/i.test(effectiveQuery)) {
             this.onLog("Intent: EXPANSION", "process");
+            const topicToExpand = this.lastTopic || this.extractTopic(effectiveQuery);
 
-            // PRIORITY 1: If there's ANY previous output, extend it (don't search Wikipedia)
-            const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
-            if (lastOutput && lastOutput.length > 20) {
-                this.onLog("Extending previous output...", "process");
-
-                // Check if it was brainstorming
-                if (this.lastResponseType === 'BRAINSTORM' && this.lastTopic) {
-                    this.onLog(`Generating MORE ideas for: ${this.lastTopic}`, "process");
-                    const moreIdeas = this.generateBrainstormIdeas(this.lastTopic);
-                    const result = {
-                        text: `Here are **more ideas** for **${this.lastTopic}**:\n\n${moreIdeas}`,
-                        sources: ["Creative Brainstorming Engine"]
-                    };
-                    this.addToHistory(query, result.text);
-                    return result;
-                }
-
-                // 2. CREATIVE EXPANSION (Story/Essay)
-                if (this.lastResponseType === 'CREATIVE' && this.lastTopic) {
-                    this.onLog(`Extending creative text for: ${this.lastTopic}`, "process");
-                    const lastOutput = this.recentOutputs[this.recentOutputs.length - 1] || "";
-                    const extension = this.generateNeuralText(lastOutput, 200);
-                    const result = {
-                        text: `**Continuing the essay:**\n\n${extension}`,
-                        sources: ["Creative Engine"]
-                    };
-                    this.addToHistory(query, result.text);
-                    return result;
-                }
-
-                // 3. FACTUAL / WIKIPEDIA EXPANSION (Default)
-                if (topicToExpand) {
-                    this.onLog("No previous output found. Searching Wikipedia...", "process");
-                    const wikiResult = await this.searchWikipedia(topicToExpand, true);
-                    if (wikiResult) {
-                        const result = {
-                            text: `Here is more detailed information about **${topicToExpand}**:\n\n${wikiResult}`,
-                            sources: ["Wikipedia (Deep Search)"]
-                        };
-                        this.addToHistory(query, result.text);
-                        return result;
-                    } else {
-                        return { text: `I couldn't find more information about ${topicToExpand}. Try asking a more specific question!`, sources: ["Search"] };
-                    }
-                } else {
-                    return { text: "I'd love to tell you more, but I'm not sure which topic we're discussing. Could you be specific?", sources: ["Conversational"] };
-                }
+            // 1. BRAINSTORMING EXPANSION
+            if (this.lastResponseType === 'BRAINSTORM' && this.lastTopic) {
+                this.onLog(`Generating MORE ideas for: ${this.lastTopic}`, "process");
+                const moreIdeas = this.generateBrainstormIdeas(this.lastTopic);
+                const result = {
+                    text: `Here are **more ideas** for **${this.lastTopic}**:\n\n${moreIdeas}`,
+                    sources: ["Creative Brainstorming Engine"]
+                };
+                this.addToHistory(query, result.text);
+                return result;
             }
 
+            // 2. CREATIVE EXPANSION (Story/Essay)
+            if (this.lastResponseType === 'CREATIVE' && this.lastTopic) {
+                this.onLog(`Extending creative text for: ${this.lastTopic}`, "process");
+                const lastOutput = this.recentOutputs[this.recentOutputs.length - 1] || "";
+                const extension = this.generateNeuralText(lastOutput, 200);
+                const result = {
+                    text: `**Continuing the essay:**\n\n${extension}`,
+                    sources: ["Creative Engine"]
+                };
+                this.addToHistory(query, result.text);
+                return result;
+            }
+
+            // 3. FACTUAL / WIKIPEDIA EXPANSION (Default)
+            if (topicToExpand) {
+                const wikiResult = await this.searchWikipedia(topicToExpand, true);
+                if (wikiResult) {
+                    const result = {
+                        text: `Here is more detailed information about **${topicToExpand}**:\n\n${wikiResult}`,
+                        sources: ["Wikipedia (Deep Search)"]
+                    };
+                    this.addToHistory(query, result.text);
+                    return result;
+                } else {
+                    return { text: `I couldn't find more information about ${topicToExpand}. Try asking a more specific question!`, sources: ["Search"] };
+                }
+            } else {
+                return { text: "I'd love to tell you more, but I'm not sure which topic we're discussing. Could you be specific?", sources: ["Conversational"] };
+            }
         }
+
         // --- SIMPLIFICATION ---
         if (intentAnalysis.primary === 'simplify' || /explain.*like.*5|simple terms/i.test(effectiveQuery)) {
             this.onLog("Intent: SIMPLIFICATION", "process");
@@ -2088,8 +2082,8 @@ const GuahhEngine = {
                 this.addToHistory(query, result.text);
                 return result;
             } else {
-                    return { text: "I don't have anything recent to simplify. Could you provide some text?", sources: [] };
-                }
+                return { text: "I don't have anything recent to simplify. Could you provide some text?", sources: [] };
+            }
         }
 
         if (intentAnalysis.primary === 'utility' || intentAnalysis.secondary.includes('utility')) {
@@ -2198,641 +2192,641 @@ const GuahhEngine = {
             return result;
         }
 
-            // --- SUMMARIZATION ---
-            if (/^(summarize|summarise|sum up|summary)/i.test(cleanQuery)) {
-                this.onLog("Intent: SUMMARIZATION", "process");
-                const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
-                if (lastOutput) {
-                    const summary = this.summarizeText(lastOutput);
-                    const result = { text: summary, sources: ["Analytical Engine"] };
-                    this.addToHistory(query, result.text);
-                    return result;
-                } else {
-                    return { text: "I don't have anything recent to summarize.", sources: [] };
-                }
-            }
-
-            // --- INTELLIGENT SEARCH ROUTING ---
-            const searchQuery = topic || effectiveQuery;
-            const needsSearch = this.isSearchQuery(effectiveQuery);
-            const hasLittleMemory = this.memory.length < 50;
-
-            // Priority Wikipedia search for:
-            // 1. Explicit search queries (what is X, who is Y, etc.)
-            // 2. Local mode with little memory
-            // 3. Questions with proper nouns (likely entities)
-            if (needsSearch || hasLittleMemory) {
-                if (needsSearch) {
-                    this.onLog("🔍 Search query detected - engaging Wikipedia...", "process");
-                } else {
-                    this.onLog("Local mode - attempting Wikipedia search...", "process");
-                }
-
-                const wikiResult = await this.searchWikipedia(searchQuery, false);
-                if (wikiResult) {
-                    this.onLog("✓ Wikipedia Data Retrieved.", "success");
-                    let text = wikiResult;
-
-                    // Add follow up if topic is clear
-                    if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
-                        text += `\n\n${this.generateFollowUpQuestion(topic)}`;
-                    }
-
-                    const result = { text: text, sources: ["Wikipedia"] };
-                    this.addToHistory(query, result.text);
-                    this.responseCache.set(cacheKey, result);
-                    this.lastResponseType = 'SEARCH'; // Track type
-                    return result;
-                } else if (needsSearch) {
-                    // If it's clearly a search query but Wikipedia failed, inform user
-                    this.onLog("Wikipedia search failed for factual query", "warning");
-                }
-            }
-            // -----------------------------------------
-
-            // --- CREATIVE REQUEST HANDLING ---
-            const isCreativeRequest = /write|essay|story|article|poem|create|make.*essay|make.*story|compose/i.test(effectiveQuery);
-
-            if (isCreativeRequest) {
-                this.onLog("Creative Intent detected.", "process");
-
-                // Try to get Wikipedia context for the topic if available
-                let wikiContext = "";
-                if (topic) {
-                    this.onLog(`Fetching Wikipedia context for topic: "${topic}"`, "process");
-                    const wikiResult = await this.searchWikipedia(topic, true); // Long form
-                    if (wikiResult) {
-                        wikiContext = wikiResult;
-                        this.onLog("✓ Wikipedia context retrieved for creative writing.", "success");
-                    }
-                }
-
-                // Detect creative type
-                let creativeText = "";
-
-                // Extract word count if present (e.g. "500 words", "200 word")
-                // Extract word count if present (e.g. "500 words", "200 word")
-                let targetWordCount = 350; // Default for creative writing (increased from 100)
-                const wordCountMatch = effectiveQuery.match(/(\d+)\s*words?/i);
-
-                if (wordCountMatch) {
-                    targetWordCount = parseInt(wordCountMatch[1]);
-                    // Cap at reasonable limit for performance/sanity
-                    if (targetWordCount > 2000) targetWordCount = 2000;
-                    if (targetWordCount < 50) targetWordCount = 50;
-                    this.onLog(`Target Word Count: ${targetWordCount}`, "info");
-
-                    // CRITICAL: Strip the word count from the topic to avoid polluting Wikipedia search
-                    // e.g. "Write a 500 word essay on frogs" -> Topic should be "frogs", not "frogs 500 words"
-                    if (topic) {
-                        topic = topic.replace(wordCountMatch[0], '').replace(/\s+/g, ' ').trim();
-                        this.onLog(`Cleaned Topic Strategy: "${topic}"`, "data");
-                    }
-                } else if (/essay/i.test(effectiveQuery)) {
-                    // If explicitly an essay but no length specified, default longer
-                    targetWordCount = 450;
-                }
-
-                if (/letter|email/i.test(effectiveQuery)) {
-                    this.onLog("Generating Letter...", "process");
-                    creativeText = this.generateLetter(topic, wikiContext);
-                } else if (/story|tale|narrative/i.test(effectiveQuery)) {
-                    this.onLog("Generating Story...", "process");
-                    creativeText = this.generateStory(topic, wikiContext, targetWordCount);
-                } else {
-                    // Default to story for generic "write about X"
-                    this.onLog("Generating Creative Content...", "process");
-                    creativeText = this.generateStory(topic, wikiContext, targetWordCount);
-                }
-
-                const result = {
-                    text: creativeText,
-                    sources: wikiContext ? ["Creative Engine", "Wikipedia"] : ["Creative Engine"]
-                };
+        // --- SUMMARIZATION ---
+        if (/^(summarize|summarise|sum up|summary)/i.test(cleanQuery)) {
+            this.onLog("Intent: SUMMARIZATION", "process");
+            const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
+            if (lastOutput) {
+                const summary = this.summarizeText(lastOutput);
+                const result = { text: summary, sources: ["Analytical Engine"] };
                 this.addToHistory(query, result.text);
-                this.responseCache.set(cacheKey, result);
-                this.lastResponseType = 'CREATIVE'; // Track type for expansion
                 return result;
-            }
-            // -----------------------------------------
-
-            this.onLog("Scanning local memory...", "warning");
-            const retrievalTokens = topic ? this.tokenize(topic) : qTokens;
-            const relevantDocs = this.retrieveRelevant(retrievalTokens);
-
-            // 1. STRONG MATCH - Return directly
-            if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.4) {
-                this.onLog(`Top Local Match (${(relevantDocs[0].score * 100).toFixed(0)}%): "${relevantDocs[0].doc.a.substring(0, 30)}..."`, "data");
-                const result = { text: relevantDocs[0].doc.a, sources: ["Local Memory"] };
-                this.addToHistory(query, result.text);
-                this.responseCache.set(cacheKey, result);
-                return result;
-            }
-
-            // 2. WEAK MATCHES - Synthesize partial knowledge
-            if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.08) {
-                this.onLog(`Weak matches found (best: ${(relevantDocs[0].score * 100).toFixed(0)}%). Synthesizing partial knowledge...`, "process");
-                const synthesized = this.synthesizePartialKnowledge(relevantDocs, query, topic);
-
-                const result = {
-                    text: synthesized,
-                    sources: ["Knowledge Synthesis", "Local Memory"]
-                };
-                this.addToHistory(query, result.text);
-                this.responseCache.set(cacheKey, result);
-                this.lastResponseType = 'FACTUAL'; // Track type
-                return result;
-            }
-
-            // 3. FINAL FALLBACK - General Template Generation
-            // (Replaces the old "I don't know" error)
-            this.onLog("No local matches. Generating general template response...", "process");
-            const template = this.generateGeneralTemplate(topic || effectiveQuery);
-            let text = template;
-
-            // Add proactive follow-up for general templates
-            if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
-                text += `\n\n${this.generateFollowUpQuestion(topic)}`;
-            }
-
-            const fallbackResult = {
-                text: text,
-                sources: ["General Knowledge Engine"]
-            };
-            this.addToHistory(query, fallbackResult.text);
-            this.responseCache.set(cacheKey, fallbackResult);
-            return fallbackResult;
-        },
-
-        retrieveRelevant(qTokens) {
-            if (qTokens.length === 0) return [];
-            const df = {};
-            this.memory.forEach(entry => {
-                const uniqueTerms = new Set(entry.tokens);
-                uniqueTerms.forEach(t => { df[t] = (df[t] || 0) + 1; });
-            });
-            const totalDocs = this.memory.length;
-            const scored = this.memory.map(entry => {
-                let weightedScore = 0;
-                let overlap = 0;
-                qTokens.forEach(t => {
-                    if (entry.tokens.includes(t)) {
-                        overlap++;
-                        const idf = Math.log(totalDocs / (df[t] || 1));
-                        weightedScore += idf;
-                    }
-                });
-                const union = new Set([...entry.tokens, ...qTokens]).size;
-                const baseScore = union === 0 ? 0 : overlap / union;
-                const finalScore = baseScore * (1 + weightedScore / 10);
-                return { doc: entry, score: Math.min(finalScore, 1), overlap };
-            });
-            return scored.filter(s => s.score > 0.05).sort((a, b) => b.score - a.score).slice(0, 15);
-        },
-
-        synthesizePartialKnowledge(relevantDocs, query, topic) {
-            // When we have weak matches (0.1 - 0.4 score), synthesize them into a response
-            this.onLog("Synthesizing partial knowledge from multiple sources...", "process");
-
-            const topDocs = relevantDocs.slice(0, 6); // Use top 6 partial matches
-
-            // Group documents by theme/similarity
-            const themes = this.clusterDocumentsByTheme(topDocs);
-            this.onLog(`Found ${themes.length} knowledge clusters`, "data");
-
-            // Build response from themes
-            let synthesized = "";
-
-            if (topic) {
-                synthesized = `Based on what I know about ${topic}:\n\n`;
             } else {
-                synthesized = "Based on related information I have:\n\n";
+                return { text: "I don't have anything recent to summarize.", sources: [] };
             }
-
-            themes.forEach((theme, idx) => {
-                // Extract key facts from each theme
-                const facts = this.extractKeyFacts(theme.docs);
-                if (facts.length > 0) {
-                    if (themes.length > 1) {
-                        synthesized += `• `;
-                    }
-                    synthesized += facts.join(". ");
-                    if (!synthesized.endsWith('.')) synthesized += '.';
-                    synthesized += "\n\n";
-                }
-            });
-
-            // Add disclaimer if confidence is low
-            const avgScore = topDocs.reduce((sum, d) => sum + d.score, 0) / topDocs.length;
-            if (avgScore < 0.25) {
-                synthesized += "\n(Note: I'm making connections from related topics in my knowledge base. For more accurate information, I'd need additional context or could search Wikipedia.)";
-            }
-
-            return synthesized.trim();
-        },
-
-        clusterDocumentsByTheme(docs) {
-            // Simple clustering by token overlap
-            const clusters = [];
-            const used = new Set();
-
-            docs.forEach((doc, idx) => {
-                if (used.has(idx)) return;
-
-                const cluster = {
-                    docs: [doc],
-                    tokens: new Set(doc.doc.tokens)
-                };
-                used.add(idx);
-
-                // Find similar docs
-                docs.forEach((otherDoc, otherIdx) => {
-                    if (used.has(otherIdx) || idx === otherIdx) return;
-
-                    // Calculate token overlap
-                    const overlap = doc.doc.tokens.filter(t => otherDoc.doc.tokens.includes(t)).length;
-                    const similarity = overlap / Math.min(doc.doc.tokens.length, otherDoc.doc.tokens.length);
-
-                    if (similarity > 0.3) {
-                        cluster.docs.push(otherDoc);
-                        otherDoc.doc.tokens.forEach(t => cluster.tokens.add(t));
-                        used.add(otherIdx);
-                    }
-                });
-
-                clusters.push(cluster);
-            });
-
-            return clusters;
-        },
-
-        extractKeyFacts(docs) {
-            // Extract the most informative sentences from a cluster
-            const facts = [];
-
-            docs.forEach(doc => {
-                const text = doc.doc.a;
-                // Split into sentences
-                const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
-
-                if (sentences.length > 0) {
-                    // Take first sentence (usually most informative)
-                    facts.push(sentences[0].trim());
-                }
-            });
-
-            // Deduplicate similar facts
-            const unique = [];
-            const seen = new Set();
-
-            facts.forEach(fact => {
-                const normalized = fact.toLowerCase().replace(/\s+/g, ' ');
-                if (!seen.has(normalized)) {
-                    seen.add(normalized);
-                    unique.push(fact);
-                }
-            });
-
-            return unique.slice(0, 3); // Return top 3 facts
-        },
-
-        getFallbackResponse() {
-            const responses = [
-                "I don't have sufficient context to answer that confidently.",
-                "That topic isn't in my current knowledge base. Try asking something else or rephrasing your question.",
-                "I'm not finding relevant information for that query.",
-                "My database doesn't contain enough information about that subject."
-            ];
-            return responses[Math.floor(Math.random() * responses.length)];
-        },
-
-        summarizeText(text) {
-            const sentences = text.split('. ').filter(s => s.trim().length > 10);
-            if (sentences.length <= 1) return "That's already quite short: " + text;
-
-            // Simple extraction summarization: First sentence + any sentence with "important" keywords or just the last one
-            const first = sentences[0];
-            const last = sentences[sentences.length - 1];
-
-            // If > 5 sentences, pick a middle one too
-            let middle = "";
-            if (sentences.length > 5) {
-                middle = sentences[Math.floor(sentences.length / 2)] + ". ";
-            }
-
-            return `In summary: ${first}. ${middle}${last}.`;
-        },
-
-        generateNeuralText(sourceText, targetLength = 40, retryCount = 0) {
-            const words = sourceText.replace(/([.,!?;:])/g, " $1 ").split(/\s+/).filter(w => w);
-            const bigrams = {};
-            const trigrams = {};
-            const starters = [];
-
-            for (let i = 0; i < words.length - 2; i++) {
-                const w1 = words[i], w2 = words[i + 1], w3 = words[i + 2];
-                if (!bigrams[w1]) bigrams[w1] = {};
-                bigrams[w1][w2] = (bigrams[w1][w2] || 0) + 1;
-
-                const key = w1 + " " + w2;
-                if (!trigrams[key]) trigrams[key] = {};
-                trigrams[key][w3] = (trigrams[key][w3] || 0) + 1;
-
-                if (i === 0 || ".!?".includes(words[i - 1])) starters.push(w1);
-            }
-
-            if (starters.length === 0) starters.push(words[0]);
-            let currentWord = starters[Math.floor(Math.random() * starters.length)];
-            let prevWord = "";
-            let output = [currentWord];
-            const recentWords = [currentWord]; // Track recent words for repetition penalty
-
-            for (let i = 0; i < targetLength; i++) {
-                let candidatePool = null;
-                if (prevWord) {
-                    const key = prevWord + " " + currentWord;
-                    if (trigrams[key]) candidatePool = trigrams[key];
-                }
-                if (!candidatePool && bigrams[currentWord]) candidatePool = bigrams[currentWord];
-                if (!candidatePool || Object.keys(candidatePool).length === 0) break;
-
-                // Apply repetition penalty to recent words
-                const penalizedPool = this.applyRepetitionPenalty(candidatePool, recentWords);
-                const next = this.sampleWithTemperature(penalizedPool, this.temperature, this.topP);
-                if (!next) break;
-
-                output.push(next);
-                recentWords.push(next);
-                if (recentWords.length > this.repetitionWindow) recentWords.shift();
-
-                prevWord = currentWord;
-                currentWord = next;
-                if (i > 15 && ".!?".includes(currentWord)) break;
-            }
-
-            let text = output.join(" ").replace(/\s+([.,!?;:])/g, "$1").replace(/^([a-z])/g, c => c.toUpperCase());
-
-            // Enhanced validation with coherence check
-            if (!this.validateOutput(text) || !this.checkCoherence(text)) {
-                if (retryCount >= 2) {
-                    this.onLog("Output check failed (max retries). Returning best effort.", "warning");
-                    return text;
-                }
-                this.onLog(`Output checks failed. Retrying...`, "warning");
-                return this.generateNeuralText(sourceText, targetLength, retryCount + 1);
-            }
-            return text;
-        },
-
-        generateStory(topic, externalContext = "", targetLength = 100) {
-            const templates = [
-                `Once upon a time, there was a ${topic}. It lived in a world full of wonder and mystery.`,
-                `In a distant land, a ${topic} began its journey. The path ahead was unknown but exciting.`,
-                `The legend of the ${topic} is known throughout the kingdom. It started on a stormy night.`,
-                `Nobody knew where the ${topic} came from, but everyone knew it was special.`
-            ];
-            // If topic is academic/essay-like, use more formal openers
-            if (targetLength > 300) {
-                templates.push(`The concept of ${topic} has long fascinated scholars and enthusiasts alike.`);
-                templates.push(`When examining ${topic}, it is important to understand its fundamental possibilities.`);
-                templates.push(`${topic} plays a significant role in our understanding of the modern world.`);
-            }
-
-            const seed = templates[Math.floor(Math.random() * templates.length)];
-
-            // Improve n-gram source: Use the seed ALONG WITH some random memory entries to provide grammar/vocabulary.
-            // We pick 20 random entries from memory to "inspire" the style.
-            let backgroundKnowledge = externalContext || "";
-            if (this.memory.length > 0) {
-                for (let i = 0; i < 20; i++) {
-                    const randomEntry = this.memory[Math.floor(Math.random() * this.memory.length)];
-                    // Filter out math/code/short entries to prevent hallucinations
-                    if (randomEntry && randomEntry.a && randomEntry.a.length > 20 && !/[\d+\-*/=]/.test(randomEntry.a) && !/[{}]/.test(randomEntry.a)) {
-                        backgroundKnowledge += randomEntry.a + " ";
-                    }
-                }
-            }
-
-            // We effectively train the model on provided examples + the seed + generic corpus to prevent loops
-            const sourceText = seed + " " + backgroundKnowledge.substring(0, 5000) + " " + this.genericCorpus;
-
-            // Long essay generation strategy:
-            // Generate in chunks if target length is large
-            if (targetLength > 200) {
-                let essay = seed;
-                // Approx 50 words per chunk for the neural generator + overhead
-                const chunks = Math.ceil(targetLength / 60);
-                let currentText = seed;
-
-                for (let i = 0; i < chunks; i++) {
-                    // Generate next chunk based on recent context
-                    const nextChunk = this.generateNeuralText(sourceText + " " + currentText.slice(-200), 60);
-                    essay += "\n\n" + nextChunk;
-                    currentText = nextChunk;
-                }
-                return essay;
-            }
-
-            return seed + "\n\n" + this.generateNeuralText(sourceText, targetLength);
-        },
-
-        detectSentiment(text) {
-            const happy = /good|great|love|happy|awesome|thanks|excellent|amazing/i;
-            const sad = /bad|sad|hate|sorrow|sorry|regret|unhappy|terrible/i;
-            if (happy.test(text)) this.emotion = "happy";
-            else if (sad.test(text)) this.emotion = "sad";
-            else this.emotion = "neutral";
-            this.onLog(`Detected Sentiment: ${this.emotion.toUpperCase()}`, "info");
-        },
-
-        generateLetter(topic, externalContext = "") {
-            const recipients = ["Friend", "Colleague", "Editor", "Sir/Madam", "Team"];
-            let recipient = recipients[Math.floor(Math.random() * recipients.length)];
-
-            if (topic) {
-                // Smart recipient extraction: "my boss about a project" -> recipient: "my boss"
-                const splitMarkers = [" about ", " regarding ", " on ", " for "];
-                let cleanTopic = topic;
-
-                for (const marker of splitMarkers) {
-                    if (topic.includes(marker)) {
-                        recipient = topic.split(marker)[0].trim();
-                        cleanTopic = topic.split(marker).slice(1).join(marker).trim();
-                        break;
-                    }
-                }
-                if (recipient === topic && topic.split(' ').length < 4) {
-                    // If no marker found but topic is short, treat whole topic as recipient if it looks like a person/role? 
-                    // Or just leave it. better to be safe.
-                    recipient = topic;
-                    cleanTopic = "the matter at hand";
-                } else if (recipient === topic) {
-                    // Topic is long description, probably NOT a recipient name
-                    recipient = "Sir/Madam";
-                    cleanTopic = topic;
-                }
-                // Fix "to my boss" -> "my boss" (already handled by extractTopic but double check)
-                recipient = recipient.replace(/^(to|for)\s+/i, '');
-
-                // Re-assign topic for the body generation
-                topic = cleanTopic;
-            }
-
-            // Adjust tone based on emotion/intent
-            let opening = "I am writing to you regarding";
-            if (topic && /convinc|persuad|beg|ask/i.test(topic)) opening = "I am writing to passionately request";
-            if (this.emotion === "happy") opening = "I am delighted to write to you about";
-            if (this.emotion === "sad") opening = "It is with a heavy heart that I write regarding";
-
-            const templates = [
-                `Dear ${recipient},\n\n${opening} ${topic || "a recent matter"}. `,
-                `To ${recipient},\n\nI wanted to share my thoughts on ${topic || "a subject of importance"}. `,
-                `Dear ${recipient},\n\nThis is a message about ${topic || "the project"}. `
-            ];
-
-            const seed = templates[Math.floor(Math.random() * templates.length)];
-
-            // Use memory to augment generation, similar to story
-            let backgroundKnowledge = "";
-            if (this.memory.length > 0) {
-                for (let i = 0; i < 15; i++) {
-                    const randomEntry = this.memory[Math.floor(Math.random() * this.memory.length)];
-                    // Filter out math/code to prevent math symbols appearing in letters
-                    if (randomEntry && randomEntry.a && randomEntry.a.length > 20 && !/[\d+\-*/=]/.test(randomEntry.a) && !/[{}]/.test(randomEntry.a)) {
-                        backgroundKnowledge += randomEntry.a + " ";
-                    }
-                }
-            }
-
-            if (externalContext) backgroundKnowledge += " " + externalContext;
-
-            const sourceText = seed + " " + backgroundKnowledge.substring(0, 6000) + " " + this.letterCorpus;
-            const body = this.generateNeuralText(sourceText, 50);
-
-            return `${seed}${body}\n\nSincerely,\nGuahh AI`;
-        },
-
-        sampleWithTemperature(candidateFreq, temperature = 1.0, topP = 0.9) {
-            const candidates = Object.keys(candidateFreq);
-            if (candidates.length === 0) return null;
-
-            const total = Object.values(candidateFreq).reduce((a, b) => a + b, 0);
-            let probs = candidates.map(word => ({ word, prob: Math.pow(candidateFreq[word] / total, 1 / temperature) }));
-            const probSum = probs.reduce((a, b) => a + b.prob, 0);
-            probs = probs.map(p => ({ word: p.word, prob: p.prob / probSum }));
-            probs.sort((a, b) => b.prob - a.prob);
-
-            let cumSum = 0;
-            const nucleus = [];
-            for (const p of probs) {
-                cumSum += p.prob;
-                nucleus.push(p);
-                if (cumSum >= topP) break;
-            }
-
-            const rand = Math.random() * nucleus.reduce((a, b) => a + b.prob, 0);
-            let running = 0;
-            for (const p of nucleus) {
-                running += p.prob;
-                if (rand <= running) return p.word;
-            }
-            return nucleus[0].word;
-        },
-
-        validateOutput(text) {
-            if (!text || text.length < 10) return false;
-            const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
-            if (words.length === 0) return false;
-
-            const uniqueRatio = new Set(words).size / words.length;
-            // console.log(`[Validation] Length: ${text.length}, Unique: ${uniqueRatio.toFixed(2)}`);
-
-            if (uniqueRatio < 0.35) return false; // Relaxed from 0.4
-
-            // Check against recent outputs for diversity
-            const similarity = this.recentOutputs.some(recent => {
-                const overlap = this.computeSimilarity(text, recent);
-                return overlap > 0.8; // Loosened from 0.7 to 0.8
-            });
-
-            return !similarity;
-        },
-
-        applyRepetitionPenalty(candidatePool, recentWords, penalty = 0.5) {
-            // Reduce probability of recently used words
-            const penalizedPool = {};
-            for (const [word, freq] of Object.entries(candidatePool)) {
-                const timesUsedRecently = recentWords.filter(w => w.toLowerCase() === word.toLowerCase()).length;
-                const penalizedFreq = timesUsedRecently > 0 ? freq * Math.pow(penalty, timesUsedRecently) : freq;
-                penalizedPool[word] = Math.max(penalizedFreq, 1); // Ensure at least 1
-            }
-            return penalizedPool;
-        },
-
-        checkCoherence(text) {
-            if (!text || text.length < 20) return false;
-
-            const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 5);
-            if (sentences.length === 0) return false;
-
-            // Check for basic coherence: sentences should have reasonable length and variety
-            let totalWords = 0;
-            let validSentences = 0;
-
-            for (const sentence of sentences) {
-                const words = sentence.trim().split(/\s+/).filter(w => w.length > 0);
-                if (words.length >= 3 && words.length <= 50) {
-                    validSentences++;
-                    totalWords += words.length;
-                }
-            }
-
-            // At least 50% of sentences should be valid length
-            const validRatio = validSentences / sentences.length;
-            return validRatio >= 0.5;
-        },
-
-        scoreTopicRelevance(text, topic) {
-            if (!topic || !text) return 0.5;
-
-            const topicWords = this.tokenize(topic);
-            const textWords = this.tokenize(text);
-
-            let matches = 0;
-            for (const topicWord of topicWords) {
-                if (textWords.includes(topicWord)) {
-                    matches++;
-                }
-            }
-
-            return topicWords.length > 0 ? matches / topicWords.length : 0;
-        },
-
-        computeSimilarity(text1, text2) {
-            const s1 = new Set(text1.toLowerCase().split(/\s+/));
-            const s2 = new Set(text2.toLowerCase().split(/\s+/));
-            const intersection = new Set([...s1].filter(x => s2.has(x)));
-            const union = new Set([...s1, ...s2]);
-            return union.size === 0 ? 0 : intersection.size / union.size;
-        },
-
-        addToHistory(query, response) {
-            this.conversationHistory.push({ query, response, timestamp: Date.now() });
-            // Increased from 10 to 50 for better context retention
-            if (this.conversationHistory.length > 50) this.conversationHistory.shift();
-            this.recentOutputs.push(response);
-            // Increased from 5 to 15 for better output diversity tracking
-            if (this.recentOutputs.length > 15) this.recentOutputs.shift();
-        },
-
-        checkDictionaryInquiry(query) {
-            const clean = query.toLowerCase().replace(/[^a-z\s]/g, '').trim();
-            const parts = clean.split(" ");
-            const lastWord = parts[parts.length - 1];
-            if (this.dictionary[clean] || this.dictionary[lastWord]) {
-                const entry = this.dictionary[clean] || this.dictionary[lastWord];
-                return `**${entry.word}** (${entry.pos}): ${entry.def}`;
-            }
-            return null;
         }
-    };
+
+        // --- INTELLIGENT SEARCH ROUTING ---
+        const searchQuery = topic || effectiveQuery;
+        const needsSearch = this.isSearchQuery(effectiveQuery);
+        const hasLittleMemory = this.memory.length < 50;
+
+        // Priority Wikipedia search for:
+        // 1. Explicit search queries (what is X, who is Y, etc.)
+        // 2. Local mode with little memory
+        // 3. Questions with proper nouns (likely entities)
+        if (needsSearch || hasLittleMemory) {
+            if (needsSearch) {
+                this.onLog("🔍 Search query detected - engaging Wikipedia...", "process");
+            } else {
+                this.onLog("Local mode - attempting Wikipedia search...", "process");
+            }
+
+            const wikiResult = await this.searchWikipedia(searchQuery, false);
+            if (wikiResult) {
+                this.onLog("✓ Wikipedia Data Retrieved.", "success");
+                let text = wikiResult;
+
+                // Add follow up if topic is clear
+                if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
+                    text += `\n\n${this.generateFollowUpQuestion(topic)}`;
+                }
+
+                const result = { text: text, sources: ["Wikipedia"] };
+                this.addToHistory(query, result.text);
+                this.responseCache.set(cacheKey, result);
+                this.lastResponseType = 'SEARCH'; // Track type
+                return result;
+            } else if (needsSearch) {
+                // If it's clearly a search query but Wikipedia failed, inform user
+                this.onLog("Wikipedia search failed for factual query", "warning");
+            }
+        }
+        // -----------------------------------------
+
+        // --- CREATIVE REQUEST HANDLING ---
+        const isCreativeRequest = /write|essay|story|article|poem|create|make.*essay|make.*story|compose/i.test(effectiveQuery);
+
+        if (isCreativeRequest) {
+            this.onLog("Creative Intent detected.", "process");
+
+            // Try to get Wikipedia context for the topic if available
+            let wikiContext = "";
+            if (topic) {
+                this.onLog(`Fetching Wikipedia context for topic: "${topic}"`, "process");
+                const wikiResult = await this.searchWikipedia(topic, true); // Long form
+                if (wikiResult) {
+                    wikiContext = wikiResult;
+                    this.onLog("✓ Wikipedia context retrieved for creative writing.", "success");
+                }
+            }
+
+            // Detect creative type
+            let creativeText = "";
+
+            // Extract word count if present (e.g. "500 words", "200 word")
+            // Extract word count if present (e.g. "500 words", "200 word")
+            let targetWordCount = 350; // Default for creative writing (increased from 100)
+            const wordCountMatch = effectiveQuery.match(/(\d+)\s*words?/i);
+
+            if (wordCountMatch) {
+                targetWordCount = parseInt(wordCountMatch[1]);
+                // Cap at reasonable limit for performance/sanity
+                if (targetWordCount > 2000) targetWordCount = 2000;
+                if (targetWordCount < 50) targetWordCount = 50;
+                this.onLog(`Target Word Count: ${targetWordCount}`, "info");
+
+                // CRITICAL: Strip the word count from the topic to avoid polluting Wikipedia search
+                // e.g. "Write a 500 word essay on frogs" -> Topic should be "frogs", not "frogs 500 words"
+                if (topic) {
+                    topic = topic.replace(wordCountMatch[0], '').replace(/\s+/g, ' ').trim();
+                    this.onLog(`Cleaned Topic Strategy: "${topic}"`, "data");
+                }
+            } else if (/essay/i.test(effectiveQuery)) {
+                // If explicitly an essay but no length specified, default longer
+                targetWordCount = 450;
+            }
+
+            if (/letter|email/i.test(effectiveQuery)) {
+                this.onLog("Generating Letter...", "process");
+                creativeText = this.generateLetter(topic, wikiContext);
+            } else if (/story|tale|narrative/i.test(effectiveQuery)) {
+                this.onLog("Generating Story...", "process");
+                creativeText = this.generateStory(topic, wikiContext, targetWordCount);
+            } else {
+                // Default to story for generic "write about X"
+                this.onLog("Generating Creative Content...", "process");
+                creativeText = this.generateStory(topic, wikiContext, targetWordCount);
+            }
+
+            const result = {
+                text: creativeText,
+                sources: wikiContext ? ["Creative Engine", "Wikipedia"] : ["Creative Engine"]
+            };
+            this.addToHistory(query, result.text);
+            this.responseCache.set(cacheKey, result);
+            this.lastResponseType = 'CREATIVE'; // Track type for expansion
+            return result;
+        }
+        // -----------------------------------------
+
+        this.onLog("Scanning local memory...", "warning");
+        const retrievalTokens = topic ? this.tokenize(topic) : qTokens;
+        const relevantDocs = this.retrieveRelevant(retrievalTokens);
+
+        // 1. STRONG MATCH - Return directly
+        if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.4) {
+            this.onLog(`Top Local Match (${(relevantDocs[0].score * 100).toFixed(0)}%): "${relevantDocs[0].doc.a.substring(0, 30)}..."`, "data");
+            const result = { text: relevantDocs[0].doc.a, sources: ["Local Memory"] };
+            this.addToHistory(query, result.text);
+            this.responseCache.set(cacheKey, result);
+            return result;
+        }
+
+        // 2. WEAK MATCHES - Synthesize partial knowledge
+        if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.08) {
+            this.onLog(`Weak matches found (best: ${(relevantDocs[0].score * 100).toFixed(0)}%). Synthesizing partial knowledge...`, "process");
+            const synthesized = this.synthesizePartialKnowledge(relevantDocs, query, topic);
+
+            const result = {
+                text: synthesized,
+                sources: ["Knowledge Synthesis", "Local Memory"]
+            };
+            this.addToHistory(query, result.text);
+            this.responseCache.set(cacheKey, result);
+            this.lastResponseType = 'FACTUAL'; // Track type
+            return result;
+        }
+
+        // 3. FINAL FALLBACK - General Template Generation
+        // (Replaces the old "I don't know" error)
+        this.onLog("No local matches. Generating general template response...", "process");
+        const template = this.generateGeneralTemplate(topic || effectiveQuery);
+        let text = template;
+
+        // Add proactive follow-up for general templates
+        if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
+            text += `\n\n${this.generateFollowUpQuestion(topic)}`;
+        }
+
+        const fallbackResult = {
+            text: text,
+            sources: ["General Knowledge Engine"]
+        };
+        this.addToHistory(query, fallbackResult.text);
+        this.responseCache.set(cacheKey, fallbackResult);
+        return fallbackResult;
+    },
+
+    retrieveRelevant(qTokens) {
+        if (qTokens.length === 0) return [];
+        const df = {};
+        this.memory.forEach(entry => {
+            const uniqueTerms = new Set(entry.tokens);
+            uniqueTerms.forEach(t => { df[t] = (df[t] || 0) + 1; });
+        });
+        const totalDocs = this.memory.length;
+        const scored = this.memory.map(entry => {
+            let weightedScore = 0;
+            let overlap = 0;
+            qTokens.forEach(t => {
+                if (entry.tokens.includes(t)) {
+                    overlap++;
+                    const idf = Math.log(totalDocs / (df[t] || 1));
+                    weightedScore += idf;
+                }
+            });
+            const union = new Set([...entry.tokens, ...qTokens]).size;
+            const baseScore = union === 0 ? 0 : overlap / union;
+            const finalScore = baseScore * (1 + weightedScore / 10);
+            return { doc: entry, score: Math.min(finalScore, 1), overlap };
+        });
+        return scored.filter(s => s.score > 0.05).sort((a, b) => b.score - a.score).slice(0, 15);
+    },
+
+    synthesizePartialKnowledge(relevantDocs, query, topic) {
+        // When we have weak matches (0.1 - 0.4 score), synthesize them into a response
+        this.onLog("Synthesizing partial knowledge from multiple sources...", "process");
+
+        const topDocs = relevantDocs.slice(0, 6); // Use top 6 partial matches
+
+        // Group documents by theme/similarity
+        const themes = this.clusterDocumentsByTheme(topDocs);
+        this.onLog(`Found ${themes.length} knowledge clusters`, "data");
+
+        // Build response from themes
+        let synthesized = "";
+
+        if (topic) {
+            synthesized = `Based on what I know about ${topic}:\n\n`;
+        } else {
+            synthesized = "Based on related information I have:\n\n";
+        }
+
+        themes.forEach((theme, idx) => {
+            // Extract key facts from each theme
+            const facts = this.extractKeyFacts(theme.docs);
+            if (facts.length > 0) {
+                if (themes.length > 1) {
+                    synthesized += `• `;
+                }
+                synthesized += facts.join(". ");
+                if (!synthesized.endsWith('.')) synthesized += '.';
+                synthesized += "\n\n";
+            }
+        });
+
+        // Add disclaimer if confidence is low
+        const avgScore = topDocs.reduce((sum, d) => sum + d.score, 0) / topDocs.length;
+        if (avgScore < 0.25) {
+            synthesized += "\n(Note: I'm making connections from related topics in my knowledge base. For more accurate information, I'd need additional context or could search Wikipedia.)";
+        }
+
+        return synthesized.trim();
+    },
+
+    clusterDocumentsByTheme(docs) {
+        // Simple clustering by token overlap
+        const clusters = [];
+        const used = new Set();
+
+        docs.forEach((doc, idx) => {
+            if (used.has(idx)) return;
+
+            const cluster = {
+                docs: [doc],
+                tokens: new Set(doc.doc.tokens)
+            };
+            used.add(idx);
+
+            // Find similar docs
+            docs.forEach((otherDoc, otherIdx) => {
+                if (used.has(otherIdx) || idx === otherIdx) return;
+
+                // Calculate token overlap
+                const overlap = doc.doc.tokens.filter(t => otherDoc.doc.tokens.includes(t)).length;
+                const similarity = overlap / Math.min(doc.doc.tokens.length, otherDoc.doc.tokens.length);
+
+                if (similarity > 0.3) {
+                    cluster.docs.push(otherDoc);
+                    otherDoc.doc.tokens.forEach(t => cluster.tokens.add(t));
+                    used.add(otherIdx);
+                }
+            });
+
+            clusters.push(cluster);
+        });
+
+        return clusters;
+    },
+
+    extractKeyFacts(docs) {
+        // Extract the most informative sentences from a cluster
+        const facts = [];
+
+        docs.forEach(doc => {
+            const text = doc.doc.a;
+            // Split into sentences
+            const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
+
+            if (sentences.length > 0) {
+                // Take first sentence (usually most informative)
+                facts.push(sentences[0].trim());
+            }
+        });
+
+        // Deduplicate similar facts
+        const unique = [];
+        const seen = new Set();
+
+        facts.forEach(fact => {
+            const normalized = fact.toLowerCase().replace(/\s+/g, ' ');
+            if (!seen.has(normalized)) {
+                seen.add(normalized);
+                unique.push(fact);
+            }
+        });
+
+        return unique.slice(0, 3); // Return top 3 facts
+    },
+
+    getFallbackResponse() {
+        const responses = [
+            "I don't have sufficient context to answer that confidently.",
+            "That topic isn't in my current knowledge base. Try asking something else or rephrasing your question.",
+            "I'm not finding relevant information for that query.",
+            "My database doesn't contain enough information about that subject."
+        ];
+        return responses[Math.floor(Math.random() * responses.length)];
+    },
+
+    summarizeText(text) {
+        const sentences = text.split('. ').filter(s => s.trim().length > 10);
+        if (sentences.length <= 1) return "That's already quite short: " + text;
+
+        // Simple extraction summarization: First sentence + any sentence with "important" keywords or just the last one
+        const first = sentences[0];
+        const last = sentences[sentences.length - 1];
+
+        // If > 5 sentences, pick a middle one too
+        let middle = "";
+        if (sentences.length > 5) {
+            middle = sentences[Math.floor(sentences.length / 2)] + ". ";
+        }
+
+        return `In summary: ${first}. ${middle}${last}.`;
+    },
+
+    generateNeuralText(sourceText, targetLength = 40, retryCount = 0) {
+        const words = sourceText.replace(/([.,!?;:])/g, " $1 ").split(/\s+/).filter(w => w);
+        const bigrams = {};
+        const trigrams = {};
+        const starters = [];
+
+        for (let i = 0; i < words.length - 2; i++) {
+            const w1 = words[i], w2 = words[i + 1], w3 = words[i + 2];
+            if (!bigrams[w1]) bigrams[w1] = {};
+            bigrams[w1][w2] = (bigrams[w1][w2] || 0) + 1;
+
+            const key = w1 + " " + w2;
+            if (!trigrams[key]) trigrams[key] = {};
+            trigrams[key][w3] = (trigrams[key][w3] || 0) + 1;
+
+            if (i === 0 || ".!?".includes(words[i - 1])) starters.push(w1);
+        }
+
+        if (starters.length === 0) starters.push(words[0]);
+        let currentWord = starters[Math.floor(Math.random() * starters.length)];
+        let prevWord = "";
+        let output = [currentWord];
+        const recentWords = [currentWord]; // Track recent words for repetition penalty
+
+        for (let i = 0; i < targetLength; i++) {
+            let candidatePool = null;
+            if (prevWord) {
+                const key = prevWord + " " + currentWord;
+                if (trigrams[key]) candidatePool = trigrams[key];
+            }
+            if (!candidatePool && bigrams[currentWord]) candidatePool = bigrams[currentWord];
+            if (!candidatePool || Object.keys(candidatePool).length === 0) break;
+
+            // Apply repetition penalty to recent words
+            const penalizedPool = this.applyRepetitionPenalty(candidatePool, recentWords);
+            const next = this.sampleWithTemperature(penalizedPool, this.temperature, this.topP);
+            if (!next) break;
+
+            output.push(next);
+            recentWords.push(next);
+            if (recentWords.length > this.repetitionWindow) recentWords.shift();
+
+            prevWord = currentWord;
+            currentWord = next;
+            if (i > 15 && ".!?".includes(currentWord)) break;
+        }
+
+        let text = output.join(" ").replace(/\s+([.,!?;:])/g, "$1").replace(/^([a-z])/g, c => c.toUpperCase());
+
+        // Enhanced validation with coherence check
+        if (!this.validateOutput(text) || !this.checkCoherence(text)) {
+            if (retryCount >= 2) {
+                this.onLog("Output check failed (max retries). Returning best effort.", "warning");
+                return text;
+            }
+            this.onLog(`Output checks failed. Retrying...`, "warning");
+            return this.generateNeuralText(sourceText, targetLength, retryCount + 1);
+        }
+        return text;
+    },
+
+    generateStory(topic, externalContext = "", targetLength = 100) {
+        const templates = [
+            `Once upon a time, there was a ${topic}. It lived in a world full of wonder and mystery.`,
+            `In a distant land, a ${topic} began its journey. The path ahead was unknown but exciting.`,
+            `The legend of the ${topic} is known throughout the kingdom. It started on a stormy night.`,
+            `Nobody knew where the ${topic} came from, but everyone knew it was special.`
+        ];
+        // If topic is academic/essay-like, use more formal openers
+        if (targetLength > 300) {
+            templates.push(`The concept of ${topic} has long fascinated scholars and enthusiasts alike.`);
+            templates.push(`When examining ${topic}, it is important to understand its fundamental possibilities.`);
+            templates.push(`${topic} plays a significant role in our understanding of the modern world.`);
+        }
+
+        const seed = templates[Math.floor(Math.random() * templates.length)];
+
+        // Improve n-gram source: Use the seed ALONG WITH some random memory entries to provide grammar/vocabulary.
+        // We pick 20 random entries from memory to "inspire" the style.
+        let backgroundKnowledge = externalContext || "";
+        if (this.memory.length > 0) {
+            for (let i = 0; i < 20; i++) {
+                const randomEntry = this.memory[Math.floor(Math.random() * this.memory.length)];
+                // Filter out math/code/short entries to prevent hallucinations
+                if (randomEntry && randomEntry.a && randomEntry.a.length > 20 && !/[\d+\-*/=]/.test(randomEntry.a) && !/[{}]/.test(randomEntry.a)) {
+                    backgroundKnowledge += randomEntry.a + " ";
+                }
+            }
+        }
+
+        // We effectively train the model on provided examples + the seed + generic corpus to prevent loops
+        const sourceText = seed + " " + backgroundKnowledge.substring(0, 5000) + " " + this.genericCorpus;
+
+        // Long essay generation strategy:
+        // Generate in chunks if target length is large
+        if (targetLength > 200) {
+            let essay = seed;
+            // Approx 50 words per chunk for the neural generator + overhead
+            const chunks = Math.ceil(targetLength / 60);
+            let currentText = seed;
+
+            for (let i = 0; i < chunks; i++) {
+                // Generate next chunk based on recent context
+                const nextChunk = this.generateNeuralText(sourceText + " " + currentText.slice(-200), 60);
+                essay += "\n\n" + nextChunk;
+                currentText = nextChunk;
+            }
+            return essay;
+        }
+
+        return seed + "\n\n" + this.generateNeuralText(sourceText, targetLength);
+    },
+
+    detectSentiment(text) {
+        const happy = /good|great|love|happy|awesome|thanks|excellent|amazing/i;
+        const sad = /bad|sad|hate|sorrow|sorry|regret|unhappy|terrible/i;
+        if (happy.test(text)) this.emotion = "happy";
+        else if (sad.test(text)) this.emotion = "sad";
+        else this.emotion = "neutral";
+        this.onLog(`Detected Sentiment: ${this.emotion.toUpperCase()}`, "info");
+    },
+
+    generateLetter(topic, externalContext = "") {
+        const recipients = ["Friend", "Colleague", "Editor", "Sir/Madam", "Team"];
+        let recipient = recipients[Math.floor(Math.random() * recipients.length)];
+
+        if (topic) {
+            // Smart recipient extraction: "my boss about a project" -> recipient: "my boss"
+            const splitMarkers = [" about ", " regarding ", " on ", " for "];
+            let cleanTopic = topic;
+
+            for (const marker of splitMarkers) {
+                if (topic.includes(marker)) {
+                    recipient = topic.split(marker)[0].trim();
+                    cleanTopic = topic.split(marker).slice(1).join(marker).trim();
+                    break;
+                }
+            }
+            if (recipient === topic && topic.split(' ').length < 4) {
+                // If no marker found but topic is short, treat whole topic as recipient if it looks like a person/role? 
+                // Or just leave it. better to be safe.
+                recipient = topic;
+                cleanTopic = "the matter at hand";
+            } else if (recipient === topic) {
+                // Topic is long description, probably NOT a recipient name
+                recipient = "Sir/Madam";
+                cleanTopic = topic;
+            }
+            // Fix "to my boss" -> "my boss" (already handled by extractTopic but double check)
+            recipient = recipient.replace(/^(to|for)\s+/i, '');
+
+            // Re-assign topic for the body generation
+            topic = cleanTopic;
+        }
+
+        // Adjust tone based on emotion/intent
+        let opening = "I am writing to you regarding";
+        if (topic && /convinc|persuad|beg|ask/i.test(topic)) opening = "I am writing to passionately request";
+        if (this.emotion === "happy") opening = "I am delighted to write to you about";
+        if (this.emotion === "sad") opening = "It is with a heavy heart that I write regarding";
+
+        const templates = [
+            `Dear ${recipient},\n\n${opening} ${topic || "a recent matter"}. `,
+            `To ${recipient},\n\nI wanted to share my thoughts on ${topic || "a subject of importance"}. `,
+            `Dear ${recipient},\n\nThis is a message about ${topic || "the project"}. `
+        ];
+
+        const seed = templates[Math.floor(Math.random() * templates.length)];
+
+        // Use memory to augment generation, similar to story
+        let backgroundKnowledge = "";
+        if (this.memory.length > 0) {
+            for (let i = 0; i < 15; i++) {
+                const randomEntry = this.memory[Math.floor(Math.random() * this.memory.length)];
+                // Filter out math/code to prevent math symbols appearing in letters
+                if (randomEntry && randomEntry.a && randomEntry.a.length > 20 && !/[\d+\-*/=]/.test(randomEntry.a) && !/[{}]/.test(randomEntry.a)) {
+                    backgroundKnowledge += randomEntry.a + " ";
+                }
+            }
+        }
+
+        if (externalContext) backgroundKnowledge += " " + externalContext;
+
+        const sourceText = seed + " " + backgroundKnowledge.substring(0, 6000) + " " + this.letterCorpus;
+        const body = this.generateNeuralText(sourceText, 50);
+
+        return `${seed}${body}\n\nSincerely,\nGuahh AI`;
+    },
+
+    sampleWithTemperature(candidateFreq, temperature = 1.0, topP = 0.9) {
+        const candidates = Object.keys(candidateFreq);
+        if (candidates.length === 0) return null;
+
+        const total = Object.values(candidateFreq).reduce((a, b) => a + b, 0);
+        let probs = candidates.map(word => ({ word, prob: Math.pow(candidateFreq[word] / total, 1 / temperature) }));
+        const probSum = probs.reduce((a, b) => a + b.prob, 0);
+        probs = probs.map(p => ({ word: p.word, prob: p.prob / probSum }));
+        probs.sort((a, b) => b.prob - a.prob);
+
+        let cumSum = 0;
+        const nucleus = [];
+        for (const p of probs) {
+            cumSum += p.prob;
+            nucleus.push(p);
+            if (cumSum >= topP) break;
+        }
+
+        const rand = Math.random() * nucleus.reduce((a, b) => a + b.prob, 0);
+        let running = 0;
+        for (const p of nucleus) {
+            running += p.prob;
+            if (rand <= running) return p.word;
+        }
+        return nucleus[0].word;
+    },
+
+    validateOutput(text) {
+        if (!text || text.length < 10) return false;
+        const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+        if (words.length === 0) return false;
+
+        const uniqueRatio = new Set(words).size / words.length;
+        // console.log(`[Validation] Length: ${text.length}, Unique: ${uniqueRatio.toFixed(2)}`);
+
+        if (uniqueRatio < 0.35) return false; // Relaxed from 0.4
+
+        // Check against recent outputs for diversity
+        const similarity = this.recentOutputs.some(recent => {
+            const overlap = this.computeSimilarity(text, recent);
+            return overlap > 0.8; // Loosened from 0.7 to 0.8
+        });
+
+        return !similarity;
+    },
+
+    applyRepetitionPenalty(candidatePool, recentWords, penalty = 0.5) {
+        // Reduce probability of recently used words
+        const penalizedPool = {};
+        for (const [word, freq] of Object.entries(candidatePool)) {
+            const timesUsedRecently = recentWords.filter(w => w.toLowerCase() === word.toLowerCase()).length;
+            const penalizedFreq = timesUsedRecently > 0 ? freq * Math.pow(penalty, timesUsedRecently) : freq;
+            penalizedPool[word] = Math.max(penalizedFreq, 1); // Ensure at least 1
+        }
+        return penalizedPool;
+    },
+
+    checkCoherence(text) {
+        if (!text || text.length < 20) return false;
+
+        const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 5);
+        if (sentences.length === 0) return false;
+
+        // Check for basic coherence: sentences should have reasonable length and variety
+        let totalWords = 0;
+        let validSentences = 0;
+
+        for (const sentence of sentences) {
+            const words = sentence.trim().split(/\s+/).filter(w => w.length > 0);
+            if (words.length >= 3 && words.length <= 50) {
+                validSentences++;
+                totalWords += words.length;
+            }
+        }
+
+        // At least 50% of sentences should be valid length
+        const validRatio = validSentences / sentences.length;
+        return validRatio >= 0.5;
+    },
+
+    scoreTopicRelevance(text, topic) {
+        if (!topic || !text) return 0.5;
+
+        const topicWords = this.tokenize(topic);
+        const textWords = this.tokenize(text);
+
+        let matches = 0;
+        for (const topicWord of topicWords) {
+            if (textWords.includes(topicWord)) {
+                matches++;
+            }
+        }
+
+        return topicWords.length > 0 ? matches / topicWords.length : 0;
+    },
+
+    computeSimilarity(text1, text2) {
+        const s1 = new Set(text1.toLowerCase().split(/\s+/));
+        const s2 = new Set(text2.toLowerCase().split(/\s+/));
+        const intersection = new Set([...s1].filter(x => s2.has(x)));
+        const union = new Set([...s1, ...s2]);
+        return union.size === 0 ? 0 : intersection.size / union.size;
+    },
+
+    addToHistory(query, response) {
+        this.conversationHistory.push({ query, response, timestamp: Date.now() });
+        // Increased from 10 to 50 for better context retention
+        if (this.conversationHistory.length > 50) this.conversationHistory.shift();
+        this.recentOutputs.push(response);
+        // Increased from 5 to 15 for better output diversity tracking
+        if (this.recentOutputs.length > 15) this.recentOutputs.shift();
+    },
+
+    checkDictionaryInquiry(query) {
+        const clean = query.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+        const parts = clean.split(" ");
+        const lastWord = parts[parts.length - 1];
+        if (this.dictionary[clean] || this.dictionary[lastWord]) {
+            const entry = this.dictionary[clean] || this.dictionary[lastWord];
+            return `**${entry.word}** (${entry.pos}): ${entry.def}`;
+        }
+        return null;
+    }
+};
