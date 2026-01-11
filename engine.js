@@ -11,6 +11,7 @@ const GuahhEngine = {
     isReady: false,
     lastTopic: null,
     emotion: "neutral", // Current emotional state
+    region: "AU", // Default region for spelling/tone
 
     // Content Safety Filter - Prevents inappropriate language
     contentSafetyFilter: [
@@ -144,6 +145,57 @@ const GuahhEngine = {
             .replace(/[^a-z0-9\s]/g, '')
             .split(/\s+/)
             .filter(w => w.length > 2);
+    },
+
+    capitalizeProperNouns(topic) {
+        if (!topic) return topic;
+
+        // Common proper noun corrections (names, places, etc.)
+        const properNouns = {
+            // People
+            "shakespeare": "Shakespeare", "newton": "Newton", "einstein": "Einstein",
+            "darwin": "Darwin", "galileo": "Galileo", "tesla": "Tesla",
+            "mozart": "Mozart", "beethoven": "Beethoven", "da vinci": "Da Vinci",
+            "picasso": "Picasso", "michelangelo": "Michelangelo", "leonardo": "Leonardo",
+            "plato": "Plato", "aristotle": "Aristotle", "socrates": "Socrates",
+            "napoleon": "Napoleon", "caesar": "Caesar", "cleopatra": "Cleopatra",
+
+            // Places
+            "australia": "Australia", "america": "America", "england": "England",
+            "france": "France", "germany": "Germany", "italy": "Italy",
+            "spain": "Spain", "china": "China", "japan": "Japan",
+            "paris": "Paris", "london": "London", "rome": "Rome",
+            "new york": "New York", "los angeles": "Los Angeles",
+
+            // Concepts/Titles
+            "world war": "World War", "the bible": "The Bible",
+            "the quran": "The Quran", "the renaissance": "The Renaissance"
+        };
+
+        let result = topic;
+
+        // Apply corrections for known proper nouns
+        for (const [incorrect, correct] of Object.entries(properNouns)) {
+            const regex = new RegExp(`\\b${incorrect}\\b`, 'gi');
+            result = result.replace(regex, correct);
+        }
+
+        // Capitalize first letter of each word if it looks like a name (2+ capital letters originally)
+        // This handles cases like "Isaac Newton" typed as "isaac newton"
+        const words = result.split(' ');
+        const capitalizedWords = words.map((word, idx) => {
+            // Always capitalize first word
+            if (idx === 0) {
+                return word.charAt(0).toUpperCase() + word.slice(1);
+            }
+            // Capitalize if it's a known title word or looks like a proper noun
+            if (word.length > 2 && !/^(the|a|an|of|in|on|at|to|for|and|or|but)$/i.test(word)) {
+                return word.charAt(0).toUpperCase() + word.slice(1);
+            }
+            return word;
+        });
+
+        return capitalizedWords.join(' ');
     },
 
     preprocessQuery(query) {
@@ -1486,10 +1538,51 @@ const GuahhEngine = {
         // (Basic length check for now)
         if (paraphrased.length < text.length * 0.3) {
             this.onLog("Paraphrase overly aggressive, reverting slightly.", "warning");
-            return text; // Safety fallback
+            return this.applyAustralianTone(text); // Safety fallback with AU spelling
         }
 
-        return paraphrased;
+        return this.applyAustralianTone(paraphrased);
+    },
+
+    applyAustralianTone(text) {
+        if (!text) return text;
+        let t = text;
+
+        // 1. Spelling Conversion (US -> AU/UK)
+        const spellingMap = {
+            "color": "colour", "honor": "honour", "labor": "labour", "favor": "favour", "neighbor": "neighbour",
+            "center": "centre", "theater": "theatre", "meter": "metre", "liter": "litre",
+            "organize": "organise", "realize": "realise", "analyze": "analyse", "paralyze": "paralyse",
+            "defense": "defence", "license": "licence", "offense": "offence", "practice": "practise", // verb distinction is tricky, defaulting to s for verbs usually but c for nouns. keeping simple for now
+            "program": "programme", "catalog": "catalogue", "dialog": "dialogue",
+            "traveler": "traveller", "jewelry": "jewellery", "check": "cheque" // Context dependent, but okay for general
+        };
+
+        // Apply spelling fixes
+        for (const [us, au] of Object.entries(spellingMap)) {
+            // Match whole words, case insensitive
+            t = t.replace(new RegExp(`\\b${us}\\b`, 'gi'), (match) => {
+                // Preserve case
+                if (match === match.toUpperCase()) return au.toUpperCase();
+                if (match[0] === match[0].toUpperCase()) return au.charAt(0).toUpperCase() + au.slice(1);
+                return au;
+            });
+            // Handle suffixes like -ing, -ed, -s for some
+            if (us.endsWith('ize')) {
+                const root = us.slice(0, -3);
+                const auRoot = au.slice(0, -3);
+                t = t.replace(new RegExp(`\\b${root}izing\\b`, 'gi'), `${auRoot}ising`);
+                t = t.replace(new RegExp(`\\b${root}ized\\b`, 'gi'), `${auRoot}ised`);
+                t = t.replace(new RegExp(`\\b${root}izes\\b`, 'gi'), `${auRoot}ises`);
+            }
+        }
+
+        return t;
+    },
+
+    isFormalContext(text) {
+        // Simple check for formal words
+        return /therefore|furthermore|consequently|regarding|sincerely|hereby/i.test(text);
     },
 
     applyFormalTone(text) {
@@ -1964,6 +2057,12 @@ const GuahhEngine = {
                 return { text: `I apologize for the inaccuracy. Here is verified information from Wikipedia:\n\n${wikiResult}`, sources: ["Wikipedia (Verified)"] };
             }
             refinementPrompt = `correct the information about ${query}`;
+        } else if (issueType === 'too_long') {
+            refinementPrompt = `summarize this briefly: ${query}`;
+        } else if (issueType === 'too_short') {
+            refinementPrompt = `expand on this in detail: ${query}`;
+        } else if (issueType === 'wrong_tone') {
+            refinementPrompt = `rewrite this with a different tone: ${query}`;
         } else {
             refinementPrompt = `improve the answer for ${query}`;
         }
@@ -2058,6 +2157,8 @@ const GuahhEngine = {
             // Apply safety filter to response text
             if (response && response.text) {
                 response.text = this.applySafetyFilter(response.text);
+                // Apply Australian Tone/Spelling as final pass
+                response.text = this.applyAustralianTone(response.text);
             }
 
             return response;
@@ -2555,7 +2656,7 @@ const GuahhEngine = {
             let creativeText = "";
 
             // Extract word count if present (e.g. "500 words", "200 word")
-            let targetWordCount = 350; // Default for creative writing (increased from 100)
+            let targetWordCount = 550; // Default for creative writing (increased from 350)
             const wordCountMatch = effectiveQuery.match(/(\d+)\s*words?/i);
 
             if (wordCountMatch) {
@@ -2573,7 +2674,7 @@ const GuahhEngine = {
                 }
             } else if (/essay/i.test(effectiveQuery)) {
                 // If explicitly an essay but no length specified, default longer
-                targetWordCount = 450;
+                targetWordCount = 600; // Increased from 450
             }
 
             if (/letter|email/i.test(effectiveQuery)) {
@@ -3077,29 +3178,29 @@ const GuahhEngine = {
     },
 
     generateBodyParagraph(topic, wikiContext, mainPoint, index) {
-        // Topic sentence - much more varied and natural
+        // Topic sentence - complete, natural sentences
         const topicSentenceStarters = [
             // Natural, conversational starters
-            `When we look at ${mainPoint}, several things stand out`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} deserves closer examination`,
-            `Consider ${mainPoint} for a moment`,
-            `What's particularly interesting about ${mainPoint} is`,
-            `We can't ignore ${mainPoint}`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} plays a key role here`,
-            `Looking at ${mainPoint}, we find`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} presents an intriguing case`,
-            `There's something compelling about ${mainPoint}`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} offers valuable perspective`,
+            `When we look at ${mainPoint}, several things stand out.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} deserves closer examination.`,
+            `Consider ${mainPoint} for a moment.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} is particularly interesting.`,
+            `We can't ignore ${mainPoint}.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} plays a key role here.`,
+            `Looking at ${mainPoint}, we find important insights.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} presents an intriguing case.`,
+            `There's something compelling about ${mainPoint}.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} offers valuable perspective.`,
             // Direct, simple starters
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} matters because`,
-            `Think about ${mainPoint}`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} reveals`,
-            `We should examine ${mainPoint}`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} shows us`
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} matters greatly.`,
+            `Think about ${mainPoint}.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} reveals important truths.`,
+            `We should examine ${mainPoint} carefully.`,
+            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} shows us a lot.`
         ];
 
         const starter = topicSentenceStarters[Math.floor(Math.random() * topicSentenceStarters.length)];
-        const topicSentence = `${starter}.`;
+        const topicSentence = starter;
 
         // Supporting sentences (use Wikipedia context if available)
         let support = "";
@@ -3180,21 +3281,15 @@ const GuahhEngine = {
     },
 
     generateConclusion(topic, outline, wikiContext) {
-        // More natural conclusions - avoid "In conclusion" and formulaic patterns
+        // Complete, natural conclusions
         const openings = [
-            `So where does this leave us with ${topic}?`,
-            `What we've seen here about ${topic} tells us`,
-            `${topic} clearly`,
-            `After examining ${topic}, it's evident that`,
-            `The story of ${topic}`,
-            `When it comes to ${topic},`,
-            `${topic} continues to`,
-            `Looking at ${topic} this way`,
-            `What stands out about ${topic} is`,
-            `${topic} matters because`,
-            // Sometimes skip the opening entirely
-            "",
-            ""
+            `${topic} is clearly an important topic.`,
+            `After examining ${topic}, it's evident that this subject deserves attention.`,
+            `${topic} continues to be relevant in today's world.`,
+            `Looking at ${topic} this way helps us understand it better.`,
+            `What stands out about ${topic} is its lasting significance.`,
+            `${topic} matters for many reasons.`,
+            `Understanding ${topic} better helps us make sense of related issues.`
         ];
 
         const opening = openings[Math.floor(Math.random() * openings.length)];

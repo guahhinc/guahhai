@@ -433,8 +433,43 @@ function handleFeedback(clickedBtn, otherBtn, query, response, rating) {
     // If negative feedback, show refinement options
     if (rating === 'bad') {
         console.log("Feedback logged: User disliked response");
-        // No more sub-options needed per user request
+        showFeedbackOptions(clickedBtn.parentNode, query, response);
     }
+}
+
+function showFeedbackOptions(parentDiv, query, response) {
+    // Check if options already exist
+    if (parentDiv.querySelector('.feedback-options')) return;
+
+    const optionsDiv = document.createElement('div');
+    optionsDiv.className = 'feedback-options';
+
+    const options = [
+        { label: "Too Long", value: "too_long" },
+        { label: "Too Short", value: "too_short" },
+        { label: "Too Simple", value: "too_simple" },
+        { label: "Too Complex", value: "too_complex" },
+        { label: "Inaccurate", value: "inaccurate" },
+        { label: "Wrong Tone", value: "wrong_tone" }
+    ];
+
+    options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.className = 'feedback-option-btn';
+        btn.textContent = opt.label;
+        btn.onclick = () => {
+            // Disable all option buttons
+            const allBtns = optionsDiv.querySelectorAll('.feedback-option-btn');
+            allBtns.forEach(b => b.disabled = true);
+            btn.classList.add('selected');
+
+            // Trigger regeneration
+            triggerRegeneration(query, opt.value, response);
+        };
+        optionsDiv.appendChild(btn);
+    });
+
+    parentDiv.appendChild(optionsDiv);
 }
 
 async function triggerRegeneration(query, issueType, originalResponse) {
