@@ -128,17 +128,32 @@ const GuahhEngine = {
             if (item.type === 'dict') {
                 this.dictionary[item.word] = item;
             } else {
-                const tokens = this.tokenize(item.q);
+                // Tokenize query if present, otherwise tokenize the answer (for knowledge entries)
+                const textToTokenize = item.q || item.a;
+                const tokens = this.tokenize(textToTokenize);
+
                 this.memory.push({
-                    q: item.q,
+                    q: item.q || "", // Ensure q is never undefined
                     a: item.a,
-                    tokens: tokens
+                    tokens: tokens,
+                    tokenSet: new Set(tokens), // O(1) Lookup
+                    type: item.type || 'conv'
                 });
                 tokens.forEach(t => this.vocab.add(t));
             }
         });
 
-        // 2. Load feedback from storage
+        // 2. Pre-calculate Document Frequency (DF) for TF-IDF optimization
+        this.df = {};
+        this.totalDocs = this.memory.length;
+        this.memory.forEach(entry => {
+            // We use tokenSet to ensure we only count each word once per document
+            entry.tokenSet.forEach(t => {
+                this.df[t] = (this.df[t] || 0) + 1;
+            });
+        });
+
+        // 3. Load feedback from storage
         this.loadFeedbackFromStorage();
 
         this.onLog("Building Vector Space Model...", "process");
@@ -240,12 +255,32 @@ const GuahhEngine = {
         const stopwords = ['the', 'is', 'at', 'which', 'on', 'a', 'an', 'and', 'or', 'but', 'in', 'with', 'to', 'for', 'of', 'as', 'by'];
         let cleaned = query.toLowerCase().trim();
 
+        // TYPO CORRECTION MAP (Common fat-finger errors)
+        const typoMap = {
+            "whtats": "what is", "whts": "what is", "whst": "what is", "waht": "what",
+            "wat": "what", "wht": "what", "wha": "what",
+            "dos": "does", "do's": "does",
+            "thnks": "thanks", "thx": "thanks", "tnx": "thanks",
+            "hwo": "how", "hw": "how",
+            "becuase": "because", "becasue": "because", "cuz": "because", "cos": "because",
+            "rlly": "really", "rly": "really",
+            "pls": "please", "plz": "please",
+            "srry": "sorry", "sry": "sorry",
+            "dont": "don't", "cant": "can't", "wont": "won't",
+            "im": "i'm", "iam": "i am",
+            "ur": "your", "ure": "you're",
+            "whats": "what is", "what's": "what is"
+        };
+
+        // Fix typos before other processing
+        const words = cleaned.split(/\s+/);
+        const correctedWords = words.map(w => typoMap[w] || w);
+        cleaned = correctedWords.join(' ');
+
         // Expand common abbreviations and colloquialisms
         cleaned = cleaned
             .replace(/\bai\b/g, 'artificial intelligence')
             .replace(/\bml\b/g, 'machine learning')
-            .replace(/\bwhat's\b/g, 'what is')
-            .replace(/\bwhats\b/g, 'what is')
             .replace(/\bwho's\b/g, 'who is')
             .replace(/\bwhos\b/g, 'who is')
             .replace(/\bhow's\b/g, 'how is')
@@ -253,10 +288,6 @@ const GuahhEngine = {
             .replace(/\binfo\b/g, 'information')
             .replace(/\bpic\b/g, 'picture')
             .replace(/\bvid\b/g, 'video')
-            .replace(/\bu\b/g, 'you')
-            .replace(/\bur\b/g, 'your')
-            .replace(/\bplz\b/g, 'please')
-            .replace(/\bthx\b/g, 'thanks')
             .replace(/\bbtw\b/g, 'by the way')
             .replace(/\bfyi\b/g, 'for your information')
             .replace(/\baka\b/g, 'also known as')
@@ -317,6 +348,9 @@ const GuahhEngine = {
         // If it's a meta query, it's NOT a search query
         if (this.isMetaQuery(query)) return false;
 
+        // Ignore personal statements (I love ..., I think ...)
+        if (/^i (love|like|think|feel|am|really|just|want|don't)/i.test(q)) return false;
+
         // Factual/informational question patterns
         const searchPatterns = [
             // Definitional questions about external topics
@@ -332,7 +366,8 @@ const GuahhEngine = {
             /^(facts about|information on|details about)/i,
 
             // Specific entity queries (proper nouns often indicate search queries)
-            /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/,  // Proper nouns
+            // MUST be at least 2 words or a known entity, preventing "I" or "Really" from triggering
+            /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/,  // Multi-word Proper nouns (e.g. New York)
         ];
 
         return searchPatterns.some(p => p.test(query));
@@ -377,8 +412,8 @@ const GuahhEngine = {
 
     isGreeting(query) {
         const greetings = [
-            /^(hi|hello|hey|greetings|howdy|sup|yo)$/i,
-            /^(hi|hello|hey|greetings|howdy|sup|yo)\s+(there|guahh|ai)?$/i,
+            /^(hi|hello|hey|greetings|howdy|sup|yo|waddup|what's good|what's crackin|what's up|whats up|wazzup)$/i,
+            /^(hi|hello|hey|greetings|howdy|sup|yo|waddup)\s+(there|guahh|ai|mate|friend)?$/i,
             /^good\s+(morning|afternoon|evening|day)$/i
         ];
         return greetings.some(p => p.test(query.trim()));
@@ -512,6 +547,11 @@ const GuahhEngine = {
             intents.push({ type: 'casual', confidence: 0.9 });
         }
 
+        // Personal Sharing / Statement (New)
+        if (/^i (really |just )?(love|like|hate|dislike|enjoy|prefer|think|feel|believe|am)/i.test(q)) {
+            intents.push({ type: 'personal_sharing', confidence: 0.9 });
+        }
+
         // === QUESTION INTENTS ===
 
         // Factual question
@@ -581,8 +621,16 @@ const GuahhEngine = {
         // === ANALYTICAL INTENTS ===
 
         // Explanation intent
+        // Explanation intent
         if (/(explain|describe|tell.*about|define|clarify|elaborate|break down|walk.*through|help me understand)/i.test(q)) {
             intents.push({ type: 'explain', confidence: 0.85 });
+        }
+
+        // CONFUSION / FEEDBACK INTENT
+        // "huh", "what do you mean", "I don't get it", "what are you doing"
+        if (/^(huh|what\??|eh\??)$/i.test(q.trim()) ||
+            /(what (do|did) you (mean|say)|i don't (get|understand)|confused|what are you doing|make sense)/i.test(q)) {
+            intents.push({ type: 'confusion', confidence: 0.99 });
         }
 
         // "What is X" is often an explanation request if searching for a complex topic
@@ -2131,18 +2179,41 @@ const GuahhEngine = {
         const q = query.toLowerCase();
 
         // 1. Casual / Small Talk
-        if (intent === 'casual' || intent === 'greeting') {
+        if (intent === 'casual' || intent === 'greeting' || intent === 'personal_sharing') {
+            // Handle personal sharing specifically
+            if (intent === 'personal_sharing') {
+                return { text: this.generateConversationalFallback(q), sources: ["Conversational"] };
+            }
+
+            // Context check: Don't excessively greet if we just did
+            const lastResponse = this.recentOutputs.length > 0 ? this.recentOutputs[this.recentOutputs.length - 1] : "";
+            if (intent === 'greeting' && /hello|hi|good|greetings/i.test(lastResponse)) {
+                return { text: "I'm still here! What's on your mind?", sources: ["Conversational"] };
+            }
+
             if (/how are you|how.*doing/i.test(q)) {
                 return { text: "I'm functioning perfectly, thanks for asking! I'm ready to help you with research, writing, or just chatting. How can I help you today?", sources: ["Conversational"] };
             }
-            if (/what.*up/i.test(q)) {
-                return { text: "Not much, just processing data and ready to assist you. What's on your mind?", sources: ["Conversational"] };
+            if (/what.*up|waddup|sup/i.test(q)) {
+                const responses = [
+                    "Not much, just processing data and ready to assist. What's up with you?",
+                    "Everything is running smoothly here. What can I do for you?",
+                    "Just waiting for your next great idea! What are we working on?"
+                ];
+                return { text: responses[Math.floor(Math.random() * responses.length)], sources: ["Conversational"] };
             }
-            if (/who.*you/i.test(q)) { // Redundant with meta but good fallback
+            if (/who.*you/i.test(q)) {
                 return { text: "I'm Guahh AI, your virtual assistant. I can help with analysis, creative writing, coding, and more.", sources: ["Conversational"] };
             }
-            // General Friendly Fallback
-            return { text: "Hello! It's great to connect with you. What would you like to explore today?", sources: ["Conversational"] };
+
+            // Randomized Friendly Fallback
+            const fallbacks = [
+                "Hello! It's great to connect with you. What would you like to explore today?",
+                "Hi there! I'm ready for anything. What's the plan?",
+                "Hey! Good to see you. How can I help?",
+                "Greetings! I'm at your service."
+            ];
+            return { text: fallbacks[Math.floor(Math.random() * fallbacks.length)], sources: ["Conversational"] };
         }
 
         // 2. Gratitude
@@ -2524,7 +2595,8 @@ const GuahhEngine = {
         }
 
         // --- META CAPABILITY QUERIES ---
-        if (this.isMetaQuery(effectiveQuery)) {
+        // Use intent analysis to ensure we don't override stronger intents like confusion
+        if (intentAnalysis.primary === 'meta' || (this.isMetaQuery(effectiveQuery) && intentAnalysis.primary !== 'confusion')) {
             this.onLog("Intent: META/CAPABILITY INQUIRY", "success");
             const metaResponses = {
                 capabilities: "I'm Guahh AI, an advanced language assistant. I can:\n\n• Answer questions using Wikipedia\n• Write creative content (stories, letters, essays)\n• Perform calculations and solve math problems\n• Paraphrase and adjust tone (formal/casual)\n• Summarize text\n• Explain concepts and provide information\n\nJust ask me anything!",
@@ -2702,6 +2774,43 @@ const GuahhEngine = {
             }
         }
 
+        // --- CONFUSION / FEEDBACK HANDLING ---
+        if (intentAnalysis.primary === 'confusion') {
+            this.onLog("Intent: USER CONFUSION", "warning");
+
+            // If we have a recent output, they might be confused about THAT
+            const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
+            const lastQuery = this.conversationHistory.length > 0 ? this.conversationHistory[this.conversationHistory.length - 1].query : null;
+
+            if (lastOutput && lastQuery) {
+                // Determine plausible reason for confusion
+                const isCode = /```/.test(lastOutput);
+                const isLong = lastOutput.length > 500;
+
+                let responseText = "I apologize if my last response was unclear.";
+
+                if (isCode) {
+                    responseText += " I provided some code, but maybe you wanted an explanation? Would you like me to explain how it works?";
+                } else if (isLong) {
+                    responseText += " It was quite detailed. Would you like a simpler summary?";
+                } else {
+                    responseText += " Could you tell me which part was confusing, or should I try explaining it differently?";
+                }
+
+                const result = { text: responseText, sources: ["Feedback Handler"] };
+                this.addToHistory(query, result.text);
+                return result;
+            } else {
+                // General confusion (no context)
+                const result = {
+                    text: "I apologize if I'm doing something unexpected. I'm just here to help! Could you rephrase what you need so I can understand better?",
+                    sources: ["Feedback Handler"]
+                };
+                this.addToHistory(query, result.text);
+                return result;
+            }
+        }
+
         if (intentAnalysis.primary === 'utility' || intentAnalysis.secondary.includes('utility')) {
             this.onLog("Intent: UTILITY / TOOL", "process");
             const utilResult = this.processUtilityRequest(effectiveQuery);
@@ -2713,14 +2822,14 @@ const GuahhEngine = {
 
         // --- CONVERSATIONAL & CASUAL HANDLING ---
         //Handle explicit conversational intents or high-confidence casual queries
-        if (['casual', 'greeting', 'farewell', 'gratitude', 'opinion', 'recommendation', 'confirmation', 'negation'].includes(intentAnalysis.primary) ||
+        if (['casual', 'greeting', 'farewell', 'gratitude', 'opinion', 'recommendation', 'confirmation', 'negation', 'personal_sharing'].includes(intentAnalysis.primary) ||
             intentAnalysis.secondary.includes('casual')) {
 
             this.onLog(`Intent: CONVERSATIONAL (${intentAnalysis.primary})`, "process");
             // Pass the updated Context (with lastAIQuestion) to the handler
             const chatResult = this.generateConversationalResponse(intentAnalysis.primary, effectiveQuery, queryContext);
             // Proactive Follow-up (Experimental)
-            if (chatResult && this.shouldAskFollowUp(q, chatResult.text)) {
+            if (chatResult && this.shouldAskFollowUp(effectiveQuery, chatResult.text)) {
                 // No specific topic for small talk usually, but let's try
                 const followup = "Is there anything specific you'd like to talk about?";
                 chatResult.text += `\n\n${followup}`;
@@ -2766,6 +2875,21 @@ const GuahhEngine = {
 
         // --- EXTRACT TOPIC EARLY FOR USE IN VARIOUS INTENTS ---
         let topic = this.extractTopic(effectiveQuery);
+
+        // === PRIORITY 0: CHECK LOCAL MEMORY (HIGH CONFIDENCE) ===
+        // If we have a near-perfect match in our knowledge base, use it immediately.
+        // This prevents searching Wikipedia for things we already know perfectly.
+        const retrievalTokens = topic ? this.tokenize(topic) : qTokens;
+        const relevantDocs = this.retrieveRelevant(retrievalTokens);
+
+        // "Really really good match" > 0.95
+        if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.95) {
+            this.onLog(`✓ PERFECT LOCAL MATCH (${(relevantDocs[0].score * 100).toFixed(0)}%): "${relevantDocs[0].doc.a.substring(0, 40)}..."`, "success");
+            const result = { text: relevantDocs[0].doc.a, sources: ["Local Memory (Verified)"] };
+            this.addToHistory(query, result.text);
+            this.responseCache.set(cacheKey, result);
+            return result;
+        }
 
         // --- BRAINSTORMING INTENT ---
         if (intentAnalysis.primary === 'brainstorm' || /brainstorm|ideas? for|suggest|come up with|give.*ideas?/i.test(cleanQuery)) {
@@ -2950,8 +3074,6 @@ const GuahhEngine = {
         // -----------------------------------------
 
         this.onLog("Scanning local memory...", "warning");
-        const retrievalTokens = topic ? this.tokenize(topic) : qTokens;
-        const relevantDocs = this.retrieveRelevant(retrievalTokens);
 
         // 1. STRONG MATCH - Return directly
         if (relevantDocs.length > 0 && relevantDocs[0].score >= 0.4) {
@@ -2979,9 +3101,11 @@ const GuahhEngine = {
 
         // 3. FINAL FALLBACK - General Template Generation
         // (Replaces the old "I don't know" error)
-        this.onLog("No local matches. Generating general template response...", "process");
-        const template = this.generateGeneralTemplate(topic || effectiveQuery);
-        let text = template;
+        // 3. FINAL FALLBACK - Smart Conversational Fallback
+        // (Replaces the old "I don't know" error)
+        this.onLog("No local matches. Generating smart fallback...", "process");
+        const fallbackText = this.generateConversationalFallback(effectiveQuery);
+        let text = fallbackText;
 
         // Add proactive follow-up for general templates
         if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
@@ -2999,28 +3123,87 @@ const GuahhEngine = {
 
     retrieveRelevant(qTokens) {
         if (qTokens.length === 0) return [];
-        const df = {};
-        this.memory.forEach(entry => {
-            const uniqueTerms = new Set(entry.tokens);
-            uniqueTerms.forEach(t => { df[t] = (df[t] || 0) + 1; });
+
+        const totalDocs = this.totalDocs || this.memory.length;
+        // Fallback for DF if not initialized (though init should handle it)
+        const df = this.df || {};
+
+        // 0. DIRECT STRING MATCH SHORTCUT (Guaranteed 100% Hit)
+        const normalizedQuery = qTokens.join(' ').toLowerCase();
+
+        // Fast Pass loop for exact matches
+        for (const entry of this.memory) {
+            // Check Exact Question Match
+            if (entry.q && entry.q.toLowerCase().trim() === normalizedQuery) {
+                return [{ doc: entry, score: 1.1, overlap: 999 }];
+            }
+            // Check Exact Answer Match (only for long unique queries > 4 words)
+            if (qTokens.length > 4 && entry.a && entry.a.toLowerCase().includes(normalizedQuery)) {
+                return [{ doc: entry, score: 1.1, overlap: 999 }];
+            }
+        }
+
+        // 1. Calculate Max Possible IDF Score (for this query)
+        // This allows us to normalize the score
+        let maxPossibleScore = 0;
+        const validTokens = [];
+
+        qTokens.forEach(t => {
+            const docFreq = df[t] || 0;
+            // IDF = log(N / (df + 1)) + 1.  Rare words have high IDF.
+            const idf = Math.log((totalDocs + 1) / (docFreq + 1)) + 1;
+            validTokens.push({ token: t, idf: idf });
+            maxPossibleScore += idf;
         });
-        const totalDocs = this.memory.length;
+
+        if (maxPossibleScore === 0) return [];
+
+        // 2. Score Documents
+
+        // IDENTIFY CRITICAL TERMS (Top 30% by IDF)
+        // These are the "concept" words. If a doc misses ALL of them, it's likely irrelevant.
+        validTokens.sort((a, b) => b.idf - a.idf);
+        const numCritical = Math.max(1, Math.floor(validTokens.length * 0.3));
+        const criticalTokens = new Set(validTokens.slice(0, numCritical).map(vt => vt.token));
+
         const scored = this.memory.map(entry => {
-            let weightedScore = 0;
+            let currentScore = 0;
             let overlap = 0;
-            qTokens.forEach(t => {
-                if (entry.tokens.includes(t)) {
+            let criticalHits = 0;
+
+            // O(QueryLen) lookup using Set
+            for (const vt of validTokens) {
+                if (entry.tokenSet.has(vt.token)) {
                     overlap++;
-                    const idf = Math.log(totalDocs / (df[t] || 1));
-                    weightedScore += idf;
+                    currentScore += vt.idf;
+                    if (criticalTokens.has(vt.token)) {
+                        criticalHits++;
+                    }
                 }
-            });
-            const union = new Set([...entry.tokens, ...qTokens]).size;
-            const baseScore = union === 0 ? 0 : overlap / union;
-            const finalScore = baseScore * (1 + weightedScore / 10);
-            return { doc: entry, score: Math.min(finalScore, 1), overlap };
+            }
+
+            if (overlap === 0) return { doc: entry, score: 0, overlap: 0 };
+
+            // Final Score = Sum of IDFs of matched terms / Sum of IDFs of all query terms
+            let coverageScore = currentScore / maxPossibleScore;
+
+            // PENALTY: If NO critical terms are found, slash the score.
+            // e.g. Query "features of success" -> "success" is critical.
+            // If doc has "features" but not "success", it gets penalized.
+            if (criticalHits === 0) {
+                coverageScore *= 0.1;
+            }
+
+            return {
+                doc: entry,
+                score: coverageScore,
+                overlap: overlap
+            };
         });
-        return scored.filter(s => s.score > 0.05).sort((a, b) => b.score - a.score).slice(0, 15);
+
+        // 3. Filter and Sort
+        // Threshold 0.3 means roughly 30% of the query's "meaning" (by weight) was found
+        return scored.filter(s => s.score >= 0.25).sort((a, b) => b.score - a.score).slice(0, 15);
     },
 
     synthesizePartialKnowledge(relevantDocs, query, topic) {
@@ -4294,5 +4477,36 @@ const GuahhEngine = {
             return `**${entry.word}** (${entry.pos}): ${entry.def}`;
         }
         return null;
+    },
+
+    generateConversationalFallback(query) {
+        const q = query.toLowerCase();
+
+        // Check for specific keywords to make the fallback feel smarter
+        if (/(love|like|enjoy|fav)/i.test(q)) {
+            return "That sounds really interesting! What is it specifically that you enjoy about it?";
+        }
+        if (/(hate|dislike|annoy|bad)/i.test(q)) {
+            return "I hear you. It can be frustrating when things aren't right. What would make it better?";
+        }
+        if (/(think|thought|opinion)/i.test(q)) {
+            return "That's a valid perspective. Have you considered looking at it from another angle?";
+        }
+        if (/(maybe|perhaps|guess)/i.test(q)) {
+            return "Uncertainty is part of the process. Sometimes it helps to list out the pros and cons.";
+        }
+        if (q.length < 10) {
+            return "Could you tell me a bit more about that? I'd love to understand better.";
+        }
+
+        // Generic but polite open-ended questions
+        const templates = [
+            "That's an interesting point. Tell me more!",
+            "I see. How does that impact what you're working on?",
+            "I'm listening. Please go on.",
+            "That's quite unique. What else can you tell me?",
+            "I'd love to hear more about your thoughts on this."
+        ];
+        return templates[Math.floor(Math.random() * templates.length)];
     }
 };
