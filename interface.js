@@ -255,6 +255,19 @@ window.sendMessage = async function () {
     const text = activeInput.value.trim();
     if (!text) return;
 
+    // CHECK PROMPT LIMIT
+    if (!checkPromptLimit()) {
+        const msg = addMessage("You have reached your daily limit of 30 prompts. Please log in with a Guahh Account for unlimited access.", false);
+        // Add login button to the message
+        const loginBtn = document.createElement('button');
+        loginBtn.className = 'feedback-btn'; // Reuse style
+        loginBtn.innerHTML = 'Sign In with Guahh Account';
+        loginBtn.style.marginTop = '10px';
+        loginBtn.onclick = () => GuahhAuthAPI.showLogin();
+        msg.querySelector('.message-content').appendChild(loginBtn);
+        return; // Stop execution
+    }
+
     // Create session if none exists
     if (!currentSession) {
         currentSession = new ChatSession();
@@ -526,6 +539,13 @@ document.addEventListener('DOMContentLoaded', () => {
     currentSession = new ChatSession();
     renderSessionList();
 
+    // Initialize Guahh Auth
+    if (typeof GuahhAuthAPI !== 'undefined') {
+        GuahhAuthAPI.onReady(() => {
+            initAuthUI();
+        });
+    }
+
     // Sidebar event listeners
     const newChatBtn = document.getElementById('newChatBtn');
     const sidebarToggle = document.getElementById('sidebarToggle');
@@ -614,4 +634,167 @@ function logFeedback(query, response, rating) {
     feedbackData.push(feedback);
     console.log(`FEEDBACK: ${rating}`, feedback);
     window.exportFeedback = () => console.log(JSON.stringify(feedbackData, null, 2));
+}
+
+// ========== GUAHH AUTH INTEGRATION ==========
+
+function initAuthUI() {
+    const profilePic = document.getElementById('profilePic');
+    const userProfile = document.getElementById('userProfile');
+
+    if (!profilePic || !userProfile) return;
+
+    const updateUI = () => {
+        const user = GuahhAuthAPI.getCurrentUser();
+        if (user) {
+            // Logged In
+            const pfp = user.profilePictureUrl || `https://api.dicebear.com/8.x/thumbs/svg?seed=${user.username}`;
+            profilePic.style.backgroundImage = `url('${pfp}')`;
+            profilePic.title = `Logged in as ${user.displayName}`;
+
+            // Unlimited Prompts
+            if (activeInput) activeInput.placeholder = "Message Guahh AI...";
+        } else {
+            // Logged Out
+            profilePic.style.backgroundImage = `url('https://api.iconify.design/carbon:user-avatar-filled.svg?color=%23a0a0a0')`; // Reset to default
+            profilePic.title = "Sign In";
+
+            // Show remaining prompts
+            updatePromptCounterUI();
+        }
+    };
+
+    // Initial check
+    updateUI();
+
+    // Listeners
+    GuahhAuthAPI.onLogin(updateUI);
+    GuahhAuthAPI.onLogout(updateUI);
+
+    // Click handler
+    userProfile.addEventListener('click', () => {
+        if (GuahhAuthAPI.isLoggedIn()) {
+            openAccountModal();
+        } else {
+            GuahhAuthAPI.showLogin();
+        }
+    });
+
+    // Modal Listeners
+    setupModalListeners();
+}
+
+function openAccountModal() {
+    const user = GuahhAuthAPI.getCurrentUser();
+    if (!user) return;
+
+    const overlay = document.getElementById('accountModalOverlay');
+    const modalPfp = document.getElementById('modalProfilePic');
+    const modalName = document.getElementById('modalDisplayName');
+    const modalUser = document.getElementById('modalUsername');
+
+    if (overlay && modalPfp && modalName && modalUser) {
+        // Populate Data
+        const pfp = user.profilePictureUrl || `https://api.dicebear.com/8.x/thumbs/svg?seed=${user.username}`;
+        modalPfp.style.backgroundImage = `url('${pfp}')`;
+        modalName.textContent = user.displayName;
+
+        // Verified Badge
+        if (user.isVerified) {
+            const badge = document.createElement('span');
+            badge.className = 'verified-badge';
+            // Google Material "verified" icon (blue filled)
+            badge.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>`;
+            modalName.appendChild(badge);
+        }
+
+        modalUser.textContent = `@${user.username}`;
+
+        // Show
+        overlay.style.display = 'flex';
+        // Add active class after a small delay for animation
+        setTimeout(() => overlay.classList.add('active'), 10);
+    }
+}
+
+function closeAccountModal() {
+    const overlay = document.getElementById('accountModalOverlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+        setTimeout(() => {
+            overlay.style.display = 'none';
+        }, 200); // Wait for transition
+    }
+}
+
+function setupModalListeners() {
+    const overlay = document.getElementById('accountModalOverlay');
+    const closeBtn = document.getElementById('modalClose');
+    const logoutBtn = document.getElementById('modalLogoutBtn');
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeAccountModal);
+    }
+
+    if (overlay) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                closeAccountModal();
+            }
+        });
+    }
+
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            if (confirm("Are you sure you want to log out?")) {
+                GuahhAuthAPI.logout(() => {
+                    closeAccountModal();
+                    // Optional: Show feedback
+                    alert("Logged out successfully.");
+                });
+            }
+        });
+    }
+}
+
+function checkPromptLimit() {
+    // 1. Check if logged in (Client-side check)
+    if (typeof GuahhAuthAPI !== 'undefined' && GuahhAuthAPI.isLoggedIn()) {
+        return true; // Unlimited
+    }
+
+    // 2. Check LocalStorage usage
+    const today = new Date().toISOString().split('T')[0];
+    let usage = JSON.parse(localStorage.getItem('guahh_daily_prompts') || '{}');
+
+    if (usage.date !== today) {
+        // Reset for new day
+        usage = { date: today, count: 0 };
+    }
+
+    if (usage.count >= 30) {
+        return false; // Limit reached
+    }
+
+    // Increment
+    usage.count++;
+    localStorage.setItem('guahh_daily_prompts', JSON.stringify(usage));
+    updatePromptCounterUI(); // Update UI after increment
+    return true;
+}
+
+function updatePromptCounterUI() {
+    if (typeof GuahhAuthAPI !== 'undefined' && GuahhAuthAPI.isLoggedIn()) return;
+    if (!activeInput) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    let usage = JSON.parse(localStorage.getItem('guahh_daily_prompts') || '{}');
+    if (usage.date !== today) usage = { count: 0 };
+
+    const remaining = Math.max(0, 30 - usage.count);
+    activeInput.placeholder = `Message Guahh AI... (${remaining} chats left)`;
+
+    if (remaining === 0) {
+        activeInput.placeholder = `No chats left. Sign in for infinite.`;
+    }
 }

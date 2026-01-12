@@ -14,6 +14,10 @@
     <meta name="apple-mobile-web-app-title" content="Guahh AI">
 
     <link rel="stylesheet" href="style.css?v=2.0">
+
+    <!-- Guahh Auth -->
+    <script src="https://guahhinc.github.io/fire/guahh-auth.js"></script>
+    <script src="guahh-auth-api.js"></script>
 </head>
 
 <body>
@@ -58,7 +62,12 @@
                     <img src="https://raw.githubusercontent.com/guahhinc/guahh/main/guahhai.png" alt="Guahh AI Logo"
                         height="32" style="margin-right: 8px;">
                     <h1>Guahh AI 1 (a)</h1>
-                    <span class="version-badge">BETA 7.5</span>
+                    <span class="version-badge">BETA 8</span>
+
+                    <!-- User Profile -->
+                    <div id="userProfile" class="user-profile">
+                        <div id="profilePic" class="profile-pic"></div>
+                    </div>
                 </div>
             </header>
 
@@ -87,6 +96,33 @@
     <script src="engine.js"></script>
     <!-- Logic -->
     <script src="interface.js"></script>
+
+    <!-- Account Modal -->
+    <div id="accountModalOverlay" class="modal-overlay">
+        <div class="account-modal">
+            <button class="modal-close" id="modalClose">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <div class="modal-header">
+                <h2>Guahh Account</h2>
+            </div>
+            <div class="modal-body">
+                <div class="account-info">
+                    <div id="modalProfilePic" class="modal-profile-pic"></div>
+                    <div class="account-text">
+                        <div id="modalDisplayName" class="account-name"></div>
+                        <div id="modalUsername" class="account-username"></div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="modalLogoutBtn" class="logout-btn">Log Out</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
