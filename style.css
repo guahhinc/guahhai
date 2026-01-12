@@ -88,7 +88,7 @@ body {
     background-size: cover;
     background-position: center;
     border: 2px solid var(--border);
-    transition: border-color 0.2s;
+    border: 2px solid var(--border);
     /* Default placeholder icon */
     background-image: url('https://api.iconify.design/carbon:user-avatar-filled.svg?color=%23a0a0a0');
 }
