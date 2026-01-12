@@ -20,8 +20,7 @@ const CHAT_SYNC_ENABLED = true; // Master toggle for chat sync feature
 const CHAT_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbwLOQB9KizyeOC07kNJHyfq_mRXj1HBWUmgZlzTUK06lcUdbIYXZkPJPpX4OqgyeAFYmg/exec';
 let syncInProgress = false;
 let lastSyncTime = null;
-let syncDebounceTimer = null;
-const SYNC_DEBOUNCE_MS = 10000; // Wait 10s after last change before syncing
+
 
 // Session Class
 class ChatSession {
@@ -95,23 +94,25 @@ function saveSession(session) {
     }
 }
 
-function deleteSession(sessionId) {
+async function deleteSession(sessionId) {
     try {
         let sessions = getAllSessions();
         sessions = sessions.filter(s => s.id !== sessionId);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 
-        // Delete from cloud if sync is enabled
-        const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
-        if (syncEnabled && GuahhAuthAPI && GuahhAuthAPI.isLoggedIn()) {
-            deleteSessionFromCloud(sessionId);
-        }
-
-        // If deleted current session, create new one
+        // Update UI immediately for better UX
         if (currentSession && currentSession.id === sessionId) {
             createNewChat();
         } else {
             renderSessionList();
+        }
+
+        // Delete from cloud if sync is enabled
+        const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
+        if (syncEnabled && GuahhAuthAPI && GuahhAuthAPI.isLoggedIn()) {
+            await deleteSessionFromCloud(sessionId);
+            // Sync after delete to ensure state is consistent
+            await syncChatsFromCloud();
         }
     } catch (e) {
         console.error('Error deleting session:', e);
@@ -974,6 +975,7 @@ function updatePromptCounterUI() {
 // ========== CHAT SYNC FUNCTIONS ==========
 
 // Trigger cloud sync with debounce
+// Trigger cloud sync immediately (Debounce removed as per user request)
 function triggerCloudSync(session) {
     if (!CHAT_SYNC_ENABLED) return;
     if (!GuahhAuthAPI || !GuahhAuthAPI.isLoggedIn()) return;
@@ -982,15 +984,8 @@ function triggerCloudSync(session) {
     const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
     if (!syncEnabled) return;
 
-    // Clear existing timer
-    if (syncDebounceTimer) {
-        clearTimeout(syncDebounceTimer);
-    }
-
-    // Set new timer to sync after debounce period
-    syncDebounceTimer = setTimeout(() => {
-        uploadChatToCloud(session);
-    }, SYNC_DEBOUNCE_MS);
+    // Sync immediately
+    uploadChatToCloud(session);
 }
 
 // Upload a single chat session to cloud
