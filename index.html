@@ -15,6 +15,9 @@
 
     <link rel="stylesheet" href="style.css?v=2.0">
 
+    <!-- Google Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
     <!-- Guahh Auth -->
     <script src="https://guahhinc.github.io/fire/guahh-auth.js"></script>
     <script src="guahh-auth-api.js"></script>
@@ -50,6 +53,15 @@
                 <h3 class="sidebar-title">Chat History</h3>
                 <div id="sessionList" class="session-list">
                     <!-- Sessions will be populated here -->
+                </div>
+            </div>
+
+            <!-- User Profile (Bottom of Sidebar) -->
+            <div id="userProfile" class="sidebar-profile">
+                <div id="profilePic" class="sidebar-profile-pic"></div>
+                <div class="sidebar-profile-info">
+                    <div id="profileName" class="sidebar-profile-name">Guest</div>
+                    <div id="profileStatus" class="sidebar-profile-status">Sign in</div>
                 </div>
             </div>
         </aside>

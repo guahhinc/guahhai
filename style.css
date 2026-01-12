@@ -80,24 +80,52 @@ body {
     align-items: center;
 }
 
-.profile-pic {
-    width: 32px;
-    height: 32px;
+/* Sidebar Profile (Bottom) */
+.sidebar-profile {
+    margin-top: auto;
+    padding: 1rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.sidebar-profile:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-profile-pic {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     background-color: var(--border);
     background-size: cover;
     background-position: center;
-    border: 2px solid var(--border);
-    border: 2px solid var(--border);
-    /* Default placeholder icon */
+    flex-shrink: 0;
     background-image: url('https://api.iconify.design/carbon:user-avatar-filled.svg?color=%23a0a0a0');
 }
 
-.profile-pic:hover {
-    border-color: var(--accent);
+.sidebar-profile-info {
+    flex: 1;
+    min-width: 0;
 }
 
-/* Modal Overlay */
+.sidebar-profile-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-profile-status {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
 .modal-overlay {
     display: none;
     position: fixed;
@@ -199,6 +227,7 @@ body {
     color: #1d9bf0;
     /* Twitter/Google Blue */
     vertical-align: middle;
+    font-size: 18px;
 }
 
 .logout-btn {

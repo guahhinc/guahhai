@@ -238,6 +238,128 @@ const GuahhEngine = {
             .trim();
     },
 
+    // ========== TYPO DETECTION & CORRECTION ==========
+
+    detectAndCorrectTypos(query) {
+        if (!query || query.length < 3) return query;
+
+        // Common misspellings dictionary
+        const commonTypos = {
+            // Famous people/characters with common misspellings
+            "shakespear": "Shakespeare",
+            "mc beth": "Macbeth",
+            "macbeth": "Macbeth",
+            "lady mc beth": "Lady Macbeth",
+            "einstein": "Einstein",
+            "napolean": "Napoleon",
+            "ceasar": "Caesar",
+
+            // Places
+            "austrailia": "Australia",
+            "britian": "Britain",
+            "portugual": "Portugal",
+
+            // Common words
+            "recieve": "receive",
+            "beleive": "believe",
+            "definately": "definitely",
+            "occured": "occurred",
+            "seperate": "separate",
+            "tommorrow": "tomorrow",
+            "untill": "until",
+            "wich": "which",
+            "thier": "their",
+            "teh": "the",
+            "adn": "and"
+        };
+
+        let corrected = query;
+
+        // Check for exact matches (case-insensitive)
+        for (const [typo, correct] of Object.entries(commonTypos)) {
+            const regex = new RegExp(`\\b${typo}\\b`, 'gi');
+            if (regex.test(corrected)) {
+                corrected = corrected.replace(regex, correct);
+                this.onLog(`Typo corrected: "${typo}" → "${correct}"`, "success");
+            }
+        }
+
+        return corrected;
+    },
+
+    levenshteinDistance(a, b) {
+        const matrix = [];
+        for (let i = 0; i <= b.length; i++) {
+            matrix[i] = [i];
+        }
+        for (let j = 0; j <= a.length; j++) {
+            matrix[0][j] = j;
+        }
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1
+                    );
+                }
+            }
+        }
+        return matrix[b.length][a.length];
+    },
+
+    learnFromFeedback(query, response, feedbackType) {
+        // Enhanced feedback learning
+        const feedbackEntry = {
+            query: query,
+            response: response,
+            type: feedbackType, // 'positive', 'negative', 'correction'
+            timestamp: Date.now()
+        };
+
+        if (feedbackType === 'positive') {
+            this.feedbackMemory.successPatterns.push(feedbackEntry);
+            // Limit to last 50 positive examples
+            if (this.feedbackMemory.successPatterns.length > 50) {
+                this.feedbackMemory.successPatterns.shift();
+            }
+        } else if (feedbackType === 'negative') {
+            this.feedbackMemory.failurePatterns.push(feedbackEntry);
+            if (this.feedbackMemory.failurePatterns.length > 50) {
+                this.feedbackMemory.failurePatterns.shift();
+            }
+        }
+
+        this.saveFeedbackToStorage();
+    },
+
+    saveFeedbackToStorage() {
+        try {
+            localStorage.setItem('guahh_feedback_memory', JSON.stringify(this.feedbackMemory));
+        } catch (e) {
+            this.onLog('Could not save feedback to storage', 'warning');
+        }
+    },
+
+    loadFeedbackFromStorage() {
+        try {
+            const stored = localStorage.getItem('guahh_feedback_memory');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                this.feedbackMemory = { ...this.feedbackMemory, ...parsed };
+                this.onLog(`Loaded feedback: ${this.feedbackMemory.successPatterns.length} positive, ${this.feedbackMemory.failurePatterns.length} negative`, 'info');
+            }
+        } catch (e) {
+            this.onLog('Could not load feedback from storage', 'warning');
+        }
+    },
+
+    // ========== END TYPO DETECTION ==========
+
+
     isMetaQuery(query) {
         const q = query.toLowerCase();
 
@@ -2309,7 +2431,11 @@ const GuahhEngine = {
         // if (!this.isReady) return { text: "Neural core not initialized.", sources: [] };
 
         // SANITIZE INPUT (Fixes Emoji Crash)
-        const sanitizedQuery = this.sanitizeInput(query);
+        let sanitizedQuery = this.sanitizeInput(query);
+
+        // TYPO DETECTION & CORRECTION
+        sanitizedQuery = this.detectAndCorrectTypos(sanitizedQuery);
+
         if (!sanitizedQuery || sanitizedQuery.length === 0) {
             return { text: "I couldn't understand that. Could you try typing it again with standard text?", sources: ["Input Handler"] };
         }
