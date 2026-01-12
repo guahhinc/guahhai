@@ -56,6 +56,18 @@
                 </div>
             </div>
 
+            <!-- Sync Status & Button -->
+            <div class="sidebar-sync">
+                <div id="syncIndicator" class="sync-indicator"></div>
+                <button id="syncButton" class="sync-button" onclick="manualSyncTrigger()" title="Sync chats">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                </button>
+            </div>
+
             <!-- User Profile (Bottom of Sidebar) -->
             <div id="userProfile" class="sidebar-profile">
                 <div id="profilePic" class="sidebar-profile-pic"></div>
@@ -75,11 +87,6 @@
                         height="32" style="margin-right: 8px;">
                     <h1>Guahh AI 1 (a)</h1>
                     <span class="version-badge">BETA 8</span>
-
-                    <!-- User Profile -->
-                    <div id="userProfile" class="user-profile">
-                        <div id="profilePic" class="profile-pic"></div>
-                    </div>
                 </div>
             </header>
 
@@ -123,15 +130,44 @@
             </div>
             <div class="modal-body">
                 <div class="account-info">
-                    <div id="modalProfilePic" class="modal-profile-pic"></div>
-                    <div class="account-text">
-                        <div id="modalDisplayName" class="account-name"></div>
-                        <div id="modalUsername" class="account-username"></div>
+                    <img id="modalProfilePic" class="modal-profile-pic" alt="Profile Picture">
+                    <div class="account-details">
+                        <h3 id="modalDisplayName">User</h3>
+                        <p id="modalUsername">@username</p>
                     </div>
                 </div>
-                <div class="modal-actions">
-                    <button id="modalLogoutBtn" class="logout-btn">Log Out</button>
+
+                <!-- Edit Profile Section (Initially Hidden) -->
+                <div id="editProfileSection" class="edit-profile-section" style="display: none;">
+                    <h4>Edit Profile</h4>
+                    <form id="editProfileForm">
+                        <div class="form-group">
+                            <label for="editDisplayName">Display Name</label>
+                            <input type="text" id="editDisplayName" class="profile-input" maxlength="50" required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="save-profile-btn">Save Changes</button>
+                            <button type="button" id="cancelEditBtn" class="cancel-edit-btn">Cancel</button>
+                        </div>
+                    </form>
                 </div>
+
+                <!-- Edit Profile Button -->
+                <button id="editProfileBtn" class="edit-profile-btn">Edit Profile</button>
+
+                <!-- Chat Sync Toggle -->
+                <div class="account-setting">
+                    <div class="setting-info">
+                        <h4>Chat Sync</h4>
+                        <p>Sync your chats across devices</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chatSyncToggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <button id="logoutBtn" class="logout-btn">Logout</button>
             </div>
         </div>
     </div>

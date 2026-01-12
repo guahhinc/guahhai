@@ -15,10 +15,18 @@ let currentSession = null;
 const STORAGE_KEY = 'guahh_chat_sessions';
 const MAX_SESSIONS = 50; // Limit to prevent localStorage overflow
 
+// Chat Sync Configuration
+const CHAT_SYNC_ENABLED = true; // Master toggle for chat sync feature
+const CHAT_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbwLOQB9KizyeOC07kNJHyfq_mRXj1HBWUmgZlzTUK06lcUdbIYXZkPJPpX4OqgyeAFYmg/exec';
+let syncInProgress = false;
+let lastSyncTime = null;
+let syncDebounceTimer = null;
+const SYNC_DEBOUNCE_MS = 10000; // Wait 10s after last change before syncing
+
 // Session Class
 class ChatSession {
-    constructor(id = null) {
-        this.id = id || `session_${Date.now()}`;
+    constructor(id) {
+        this.id = id || 'session_' + Date.now();
         this.title = 'New Chat';
         this.created = Date.now();
         this.lastUpdated = Date.now();
@@ -79,6 +87,9 @@ function saveSession(session) {
 
         localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
         renderSessionList();
+
+        // Trigger cloud sync if enabled and user is logged in
+        triggerCloudSync(session);
     } catch (e) {
         console.error('Error saving session:', e);
     }
@@ -89,6 +100,12 @@ function deleteSession(sessionId) {
         let sessions = getAllSessions();
         sessions = sessions.filter(s => s.id !== sessionId);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+
+        // Delete from cloud if sync is enabled
+        const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
+        if (syncEnabled && GuahhAuthAPI && GuahhAuthAPI.isLoggedIn()) {
+            deleteSessionFromCloud(sessionId);
+        }
 
         // If deleted current session, create new one
         if (currentSession && currentSession.id === sessionId) {
@@ -313,7 +330,16 @@ window.sendMessage = async function () {
         return;
     }
 
-    const result = await GuahhEngine.generateResponse(text);
+    // Get user's name if logged in
+    let userName = null;
+    if (typeof GuahhAuthAPI !== 'undefined' && GuahhAuthAPI.isLoggedIn()) {
+        const user = GuahhAuthAPI.getCurrentUser();
+        if (user && user.displayName) {
+            userName = user.displayName;
+        }
+    }
+
+    const result = await GuahhEngine.generateResponse(text, currentSession.messages, userName);
 
     // Remove typing indicator
     removeTypingIndicator(typingIndicator);
@@ -362,17 +388,20 @@ function addMessage(text, isUser, skipTyping = false) {
 }
 
 function typeWriter(element, text) {
-    let i = 0;
-    const speed = 10;
+    const words = text.split(' '); // Split by words
+    let wordIndex = 0;
+    const speed = 30; // Speed per word
+
     function type() {
-        if (i < text.length) {
-            const char = text.charAt(i);
-            element.innerHTML += (char === '\n') ? '<br>' : char;
-            i++;
+        if (wordIndex < words.length) {
+            // Build text word by word
+            const currentText = words.slice(0, wordIndex + 1).join(' ');
+            element.innerHTML = formatMarkdown(currentText);
+            wordIndex++;
             if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
             setTimeout(type, speed);
         } else {
-            // When done typing, apply markdown formatting while preserving line breaks
+            // When done typing, apply full markdown formatting
             element.innerHTML = formatMarkdown(text);
             if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
         }
@@ -381,9 +410,10 @@ function typeWriter(element, text) {
 }
 
 function formatMarkdown(text) {
-    // First replace all newlines with <br> tags
+    // This function is now largely redundant if marked.parse is used directly
+    // Keeping it for potential other uses or if marked.parse isn't always desired.
+    // If marked.parse is used everywhere, this function can be removed.
     let formatted = text.replace(/\n/g, '<br>');
-    // Then apply bold formatting
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
     return formatted;
 }
@@ -634,6 +664,27 @@ function logFeedback(query, response, rating) {
     feedbackData.push(feedback);
     console.log(`FEEDBACK: ${rating}`, feedback);
     window.exportFeedback = () => console.log(JSON.stringify(feedbackData, null, 2));
+
+    // Store feedback in current session
+    if (currentSession) {
+        // Find the message and add feedback to it
+        const messageIndex = currentSession.messages.findIndex(
+            m => m.role === 'assistant' && m.content === response
+        );
+
+        if (messageIndex !== -1) {
+            if (!currentSession.messages[messageIndex].feedback) {
+                currentSession.messages[messageIndex].feedback = [];
+            }
+            currentSession.messages[messageIndex].feedback.push({
+                rating: rating,
+                timestamp: feedback.timestamp
+            });
+
+            // Save session and trigger sync
+            saveSession(currentSession);
+        }
+    }
 }
 
 // ========== GUAHH AUTH INTEGRATION ==========
@@ -641,6 +692,8 @@ function logFeedback(query, response, rating) {
 function initAuthUI() {
     const profilePic = document.getElementById('profilePic');
     const userProfile = document.getElementById('userProfile');
+    const profileName = document.getElementById('profileName');
+    const profileStatus = document.getElementById('profileStatus');
 
     if (!profilePic || !userProfile) return;
 
@@ -652,12 +705,23 @@ function initAuthUI() {
             profilePic.style.backgroundImage = `url('${pfp}')`;
             profilePic.title = `Logged in as ${user.displayName}`;
 
+            // Update sidebar text
+            if (profileName) profileName.textContent = user.displayName;
+            if (profileStatus) profileStatus.textContent = '@' + user.username;
+
             // Unlimited Prompts
             if (activeInput) activeInput.placeholder = "Message Guahh AI...";
+
+            // Trigger chat sync on login
+            syncChatsFromCloud();
         } else {
             // Logged Out
             profilePic.style.backgroundImage = `url('https://api.iconify.design/carbon:user-avatar-filled.svg?color=%23a0a0a0')`; // Reset to default
             profilePic.title = "Sign In";
+
+            // Update sidebar text
+            if (profileName) profileName.textContent = 'Guest';
+            if (profileStatus) profileStatus.textContent = 'Sign in';
 
             // Show remaining prompts
             updatePromptCounterUI();
@@ -695,32 +759,135 @@ function openAccountModal() {
     if (!user) return;
 
     const overlay = document.getElementById('accountModalOverlay');
-    const modalPfp = document.getElementById('modalProfilePic');
-    const modalName = document.getElementById('modalDisplayName');
-    const modalUser = document.getElementById('modalUsername');
+    const modalProfilePic = document.getElementById('modalProfilePic');
+    const modalDisplayName = document.getElementById('modalDisplayName');
+    const modalUsername = document.getElementById('modalUsername');
+    const syncToggle = document.getElementById('chatSyncToggle');
 
-    if (overlay && modalPfp && modalName && modalUser) {
-        // Populate Data
+    if (overlay && modalProfilePic && modalDisplayName && modalUsername) {
+        // Populate modal with user info
         const pfp = user.profilePictureUrl || `https://api.dicebear.com/8.x/thumbs/svg?seed=${user.username}`;
-        modalPfp.style.backgroundImage = `url('${pfp}')`;
-        modalName.textContent = user.displayName;
+        modalProfilePic.style.backgroundImage = `url('${pfp}')`; // Keep style.backgroundImage for consistency with profilePic
+        modalDisplayName.textContent = user.displayName;
 
-        // Verified Badge
-        if (user.isVerified) {
-            const badge = document.createElement('span');
-            badge.className = 'verified-badge material-icons';
-            badge.textContent = 'verified';
-            badge.setAttribute('aria-label', 'Verified');
-            modalName.appendChild(badge);
+        // Add verified badge if user is verified
+        if (user.isVerified === 'TRUE' || user.isVerified === true) {
+            if (!modalDisplayName.querySelector('.verified-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'verified-badge';
+                badge.innerHTML = '<span class="material-icons">verified</span>';
+                modalDisplayName.appendChild(badge);
+            }
         }
 
-        modalUser.textContent = `@${user.username}`;
+        modalUsername.textContent = `@${user.username}`;
+
+        // Load sync preference
+        const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
+        if (syncToggle) {
+            syncToggle.checked = syncEnabled;
+
+            // Add toggle event listener
+            syncToggle.onchange = async (e) => {
+                const isEnabled = e.target.checked;
+                localStorage.setItem('guahh_chat_sync_enabled', isEnabled ? 'true' : 'false');
+
+                if (!isEnabled) {
+                    // User disabled sync - delete all cloud chats
+                    if (confirm('This will delete all your synced chats from the cloud. Your local chats will remain. Continue?')) {
+                        await deleteAllCloudChats();
+                        updateSyncIndicator(''); // This will show "Syncing is off"
+                    } else {
+                        // User cancelled, re-enable toggle
+                        e.target.checked = true;
+                        localStorage.setItem('guahh_chat_sync_enabled', 'true');
+                    }
+                } else {
+                    // User enabled sync - sync current chats
+                    const allSessions = getAllSessions();
+                    for (const session of allSessions) {
+                        await uploadChatToCloud(session);
+                    }
+                }
+            };
+        }
+
+        // Setup edit profile handlers
+        setupEditProfileHandlers(user);
 
         // Show
         overlay.style.display = 'flex';
         // Add active class after a small delay for animation
         setTimeout(() => overlay.classList.add('active'), 10);
     }
+}
+
+// Setup edit profile event handlers
+function setupEditProfileHandlers(user) {
+    const editProfileBtn = document.getElementById('editProfileBtn');
+    const editProfileSection = document.getElementById('editProfileSection');
+    const editProfileForm = document.getElementById('editProfileForm');
+    const editDisplayName = document.getElementById('editDisplayName');
+    const cancelEditBtn = document.getElementById('cancelEditBtn');
+    const accountInfo = document.querySelector('.account-info');
+
+    if (!editProfileBtn || !editProfileSection || !editProfileForm) return;
+
+    // Show edit form
+    editProfileBtn.onclick = () => {
+        editDisplayName.value = user.displayName;
+        editProfileSection.style.display = 'block';
+        editProfileBtn.style.display = 'none';
+        if (accountInfo) accountInfo.style.display = 'none';
+    };
+
+    // Cancel editing
+    cancelEditBtn.onclick = () => {
+        editProfileSection.style.display = 'none';
+        editProfileBtn.style.display = 'block';
+        if (accountInfo) accountInfo.style.display = 'flex';
+    };
+
+    // Save profile changes
+    editProfileForm.onsubmit = async (e) => {
+        e.preventDefault();
+
+        const newDisplayName = editDisplayName.value.trim();
+        if (!newDisplayName) {
+            alert('Display name cannot be empty');
+            return;
+        }
+
+        try {
+            const result = await GuahhAuthAPI.updateProfile({
+                displayName: newDisplayName
+            });
+
+            if (result.status === 'success') {
+                // Update UI immediately
+                document.getElementById('modalDisplayName').textContent = newDisplayName;
+
+                // Update stored user data
+                const currentUser = GuahhAuthAPI.getCurrentUser();
+                if (currentUser) {
+                    currentUser.displayName = newDisplayName;
+                    GuahhAuthAPI.saveUserData(currentUser);
+                }
+
+                // Hide edit form
+                editProfileSection.style.display = 'none';
+                editProfileBtn.style.display = 'block';
+                if (accountInfo) accountInfo.style.display = 'flex';
+
+                alert('Profile updated successfully!');
+            } else {
+                alert('Failed to update profile: ' + (result.message || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Error updating profile:', error);
+            alert('An error occurred while updating your profile');
+        }
+    };
 }
 
 function closeAccountModal() {
@@ -736,7 +903,7 @@ function closeAccountModal() {
 function setupModalListeners() {
     const overlay = document.getElementById('accountModalOverlay');
     const closeBtn = document.getElementById('modalClose');
-    const logoutBtn = document.getElementById('modalLogoutBtn');
+    const logoutBtn = document.getElementById('logoutBtn'); // Fixed: was modalLogoutBtn
 
     if (closeBtn) {
         closeBtn.addEventListener('click', closeAccountModal);
@@ -755,8 +922,7 @@ function setupModalListeners() {
             if (confirm("Are you sure you want to log out?")) {
                 GuahhAuthAPI.logout(() => {
                     closeAccountModal();
-                    // Optional: Show feedback
-                    alert("Logged out successfully.");
+                    location.reload(); // Refresh page
                 });
             }
         });
@@ -803,4 +969,308 @@ function updatePromptCounterUI() {
     if (remaining === 0) {
         activeInput.placeholder = `No chats left. Sign in for infinite.`;
     }
+}
+
+// ========== CHAT SYNC FUNCTIONS ==========
+
+// Trigger cloud sync with debounce
+function triggerCloudSync(session) {
+    if (!CHAT_SYNC_ENABLED) return;
+    if (!GuahhAuthAPI || !GuahhAuthAPI.isLoggedIn()) return;
+
+    // Check if user has enabled sync
+    const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
+    if (!syncEnabled) return;
+
+    // Clear existing timer
+    if (syncDebounceTimer) {
+        clearTimeout(syncDebounceTimer);
+    }
+
+    // Set new timer to sync after debounce period
+    syncDebounceTimer = setTimeout(() => {
+        uploadChatToCloud(session);
+    }, SYNC_DEBOUNCE_MS);
+}
+
+// Upload a single chat session to cloud
+async function uploadChatToCloud(session) {
+    if (!CHAT_SYNC_ENABLED || syncInProgress) return;
+    if (!GuahhAuthAPI || !GuahhAuthAPI.isLoggedIn()) return;
+
+    const user = GuahhAuthAPI.getCurrentUser();
+    if (!user || !user.userId) {
+        console.error('Upload failed: No user ID');
+        return;
+    }
+
+    try {
+        syncInProgress = true;
+        updateSyncIndicator('syncing');
+
+        console.log('Uploading chat to cloud:', session.id, 'User:', user.userId);
+
+        const response = await fetch(CHAT_SYNC_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain'
+            },
+            body: JSON.stringify({
+                action: 'saveChat',
+                userId: user.userId,
+                sessionId: session.id,
+                chatData: {
+                    title: session.title,
+                    created: session.created,
+                    lastUpdated: session.lastUpdated,
+                    messages: session.messages
+                },
+                feedbackData: extractFeedbackFromSession(session)
+            })
+        });
+
+        console.log('Sync response status:', response.status);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('Sync result:', result);
+
+        if (result.status === 'success') {
+            lastSyncTime = Date.now();
+            updateSyncIndicator('synced');
+            console.log('✓ Chat synced to cloud:', session.id);
+        } else {
+            updateSyncIndicator('error');
+            console.error('✗ Sync failed:', result.message);
+        }
+    } catch (error) {
+        updateSyncIndicator('error');
+        console.error('✗ Error syncing to cloud:', error);
+        console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+        });
+    } finally {
+        syncInProgress = false;
+    }
+}
+
+// Download all chats from cloud and merge with local
+async function syncChatsFromCloud() {
+    if (!CHAT_SYNC_ENABLED) return;
+    if (!GuahhAuthAPI || !GuahhAuthAPI.isLoggedIn()) return;
+
+    const user = GuahhAuthAPI.getCurrentUser();
+    if (!user || !user.userId) {
+        console.error('Sync failed: No user ID');
+        return;
+    }
+
+    // Check if user has enabled sync
+    const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
+    if (!syncEnabled) {
+        console.log('Sync disabled by user preference');
+        return;
+    }
+
+    try {
+        syncInProgress = true;
+        updateSyncIndicator('syncing');
+
+        console.log('Downloading chats from cloud for user:', user.userId);
+
+        const response = await fetch(`${CHAT_SYNC_API_URL}?action=getChats&userId=${user.userId}`);
+        console.log('Download response status:', response.status);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('Download result:', result);
+
+        if (result.status === 'success' && result.chats) {
+            console.log(`✓ Downloaded ${result.count} chats from cloud`);
+
+            // Merge cloud chats with local chats
+            let localSessions = getAllSessions();
+            const localSessionMap = new Map(localSessions.map(s => [s.id, s]));
+
+            result.chats.forEach(cloudChat => {
+                const localSession = localSessionMap.get(cloudChat.sessionId);
+
+                if (!localSession) {
+                    // New chat from cloud, add it
+                    localSessions.push({
+                        id: cloudChat.sessionId,
+                        title: cloudChat.chatData.title || 'Synced Chat',
+                        created: cloudChat.chatData.created || Date.now(),
+                        lastUpdated: cloudChat.chatData.lastUpdated || Date.now(),
+                        messages: cloudChat.chatData.messages || []
+                    });
+                } else {
+                    // Chat exists locally, use the one with latest timestamp
+                    const cloudUpdated = new Date(cloudChat.lastUpdated).getTime();
+                    const localUpdated = localSession.lastUpdated;
+
+                    if (cloudUpdated > localUpdated) {
+                        // Cloud is newer, update local
+                        localSession.title = cloudChat.chatData.title;
+                        localSession.lastUpdated = cloudChat.chatData.lastUpdated;
+                        localSession.messages = cloudChat.chatData.messages;
+                    }
+                }
+            });
+
+            // Sort by last updated
+            localSessions.sort((a, b) => b.lastUpdated - a.lastUpdated);
+
+            // Save merged sessions
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(localSessions));
+            renderSessionList();
+
+            lastSyncTime = Date.now();
+            updateSyncIndicator('synced');
+        } else {
+            updateSyncIndicator('error');
+            console.error('✗ Failed to download chats:', result.message);
+        }
+    } catch (error) {
+        updateSyncIndicator('error');
+        console.error('✗ Error downloading chats:', error);
+        console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+        });
+    } finally {
+        syncInProgress = false;
+    }
+}
+
+// Update sync indicator UI
+function updateSyncIndicator(status) {
+    const indicator = document.getElementById('syncIndicator');
+    if (!indicator) return;
+
+    // Check if sync is disabled
+    const syncEnabled = localStorage.getItem('guahh_chat_sync_enabled') !== 'false';
+    if (!syncEnabled) {
+        indicator.textContent = 'Syncing is off';
+        indicator.style.color = '#666';
+        return;
+    }
+
+    switch (status) {
+        case 'syncing':
+            indicator.textContent = 'Syncing...';
+            indicator.style.color = '#4a9eff';
+            break;
+        case 'synced':
+            indicator.textContent = 'Synced';
+            indicator.style.color = '#10b981';
+            setTimeout(() => {
+                if (lastSyncTime) {
+                    const timeDiff = Math.floor((Date.now() - lastSyncTime) / 1000);
+                    indicator.textContent = `Last synced: ${timeDiff}s ago`;
+                }
+            }, 2000);
+            break;
+        case 'error':
+            indicator.textContent = 'Sync error';
+            indicator.style.color = '#ef4444';
+            break;
+        default:
+            indicator.textContent = '';
+    }
+}
+
+// Manual sync trigger (for sync button)
+async function manualSyncTrigger() {
+    if (syncInProgress) return;
+    await syncChatsFromCloud();
+}
+
+// Delete all cloud chats for current user
+async function deleteAllCloudChats() {
+    if (!GuahhAuthAPI || !GuahhAuthAPI.isLoggedIn()) return;
+
+    const user = GuahhAuthAPI.getCurrentUser();
+    if (!user || !user.userId) return;
+
+    try {
+        updateSyncIndicator('syncing');
+
+        // Get all user's chats from cloud
+        const response = await fetch(`${CHAT_SYNC_API_URL}?action=getChats&userId=${user.userId}`);
+        const result = await response.json();
+
+        if (result.status === 'success' && result.chats) {
+            // Delete each chat
+            for (const chat of result.chats) {
+                await fetch(CHAT_SYNC_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain'
+                    },
+                    body: JSON.stringify({
+                        action: 'deleteChat',
+                        userId: user.userId,
+                        sessionId: chat.sessionId
+                    })
+                });
+            }
+
+            console.log(`Deleted ${result.chats.length} chats from cloud`);
+            updateSyncIndicator('');
+        }
+    } catch (error) {
+        console.error('Error deleting cloud chats:', error);
+        updateSyncIndicator('error');
+    }
+}
+
+// Delete a single session from cloud
+async function deleteSessionFromCloud(sessionId) {
+    if (!GuahhAuthAPI || !GuahhAuthAPI.isLoggedIn()) return;
+
+    const user = GuahhAuthAPI.getCurrentUser();
+    if (!user || !user.userId) return;
+
+    try {
+        await fetch(CHAT_SYNC_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain'
+            },
+            body: JSON.stringify({
+                action: 'deleteChat',
+                userId: user.userId,
+                sessionId: sessionId
+            })
+        });
+
+        console.log('Deleted session from cloud:', sessionId);
+    } catch (error) {
+        console.error('Error deleting session from cloud:', error);
+    }
+}
+
+// Extract feedback data from session
+function extractFeedbackFromSession(session) {
+    const feedbackMap = {};
+
+    if (session && session.messages) {
+        session.messages.forEach((msg, index) => {
+            if (msg.role === 'assistant' && msg.feedback) {
+                feedbackMap[`message_${index}`] = msg.feedback;
+            }
+        });
+    }
+
+    return feedbackMap;
 }

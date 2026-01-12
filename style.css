@@ -126,6 +126,44 @@ body {
     color: var(--text-muted);
 }
 
+/* Sidebar Sync Section */
+.sidebar-sync {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.sync-indicator {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    flex: 1;
+}
+
+.sync-button {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem;
+    cursor: pointer;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.sync-button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--accent);
+}
+
+.sync-button:active {
+    transform: scale(0.95);
+}
+
 .modal-overlay {
     display: none;
     position: fixed;
@@ -540,11 +578,186 @@ body {
     border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
+::-webkit-scrollbar-th.logout-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
 }
 
-/* ========== SIDEBAR ========== */
+/* Account Setting */
+.account-setting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    margin: 1rem 0;
+}
+
+.setting-info h4 {
+    margin: 0 0 0.25rem 0;
+    font-size: 0.95rem;
+    color: var(--text);
+}
+
+.setting-info p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #444;
+    border-radius: 26px;
+    transition: 0.3s;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: 0.3s;
+}
+
+.toggle-switch input:checked+.toggle-slider {
+    background-color: var(--accent);
+}
+
+.toggle-switch input:checked+.toggle-slider:before {
+    transform: translateX(24px);
+}
+
+.toggle-slider:hover {
+    box-shadow: 0 0 10px rgba(74, 158, 255, 0.3);
+}
+
+/* Edit Profile Section */
+.edit-profile-btn {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    margin: 1rem 0;
+    transition: all 0.2s;
+}
+
+.edit-profile-btn:hover {
+    background: #3a8ae6;
+    transform: translateY(-1px);
+}
+
+.edit-profile-section {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+}
+
+.edit-profile-section h4 {
+    margin: 0 0 1rem 0;
+    color: var(--text);
+    font-size: 1rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.profile-input {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.95rem;
+    transition: all 0.2s;
+}
+
+.profile-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.1);
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.save-profile-btn {
+    flex: 1;
+    padding: 0.75rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.save-profile-btn:hover {
+    background: #3a8ae6;
+}
+
+.cancel-edit-btn {
+    flex: 1;
+    padding: 0.75rem;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.cancel-edit-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--text-muted);
+}
+
+/* ========== CHAT AREA ========== */
 
 /* Sidebar Container */
 .sidebar {
