@@ -321,6 +321,19 @@ window.sendMessage = async function () {
         console.warn("Engine not ready, forcing fallback init...");
         GuahhEngine.init(localFallbackMemory, logToTerminal);
         if (statusText) statusText.innerText = 'Guahh AI 1 (a) (Local)';
+
+        // Sync user context after fallback init
+        if (typeof GuahhAuthAPI !== 'undefined' && GuahhAuthAPI.isLoggedIn()) {
+            const user = GuahhAuthAPI.getCurrentUser();
+            if (user && GuahhEngine.setUser) {
+                GuahhEngine.setUser({
+                    displayName: user.displayName,
+                    username: user.username,
+                    userId: user.userId
+                });
+                console.log('[Guahh AI] User context synced after fallback init:', user.displayName);
+            }
+        }
     }
 
     if (!GuahhEngine.isReady) {
@@ -631,6 +644,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.GuahhEngine) {
                 GuahhEngine.init(localFallbackMemory, logToTerminal);
                 if (statusText) statusText.innerText = 'Guahh AI (Local Mode)';
+
+                // Set user context if already logged in (with retry for async auth loading)
+                const syncUserContext = (attempts = 0) => {
+                    if (typeof GuahhAuthAPI !== 'undefined' && GuahhAuthAPI.isLoggedIn()) {
+                        const user = GuahhAuthAPI.getCurrentUser();
+                        if (user && GuahhEngine.setUser) {
+                            GuahhEngine.setUser({
+                                displayName: user.displayName,
+                                username: user.username,
+                                userId: user.userId
+                            });
+                            console.log('[Guahh AI] User context synced:', user.displayName);
+                        }
+                    } else if (attempts < 5) {
+                        // Auth might still be loading user from localStorage
+                        setTimeout(() => syncUserContext(attempts + 1), 300);
+                    }
+                };
+                syncUserContext();
             }
         }, 500);
 
@@ -647,6 +679,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (window.GuahhEngine) {
                         GuahhEngine.init(data, logToTerminal);
                         if (statusText) statusText.innerText = 'Guahh AI 1 (a)';
+
+                        // Set user context if already logged in (with retry for async auth loading)
+                        const syncUserContext = (attempts = 0) => {
+                            if (typeof GuahhAuthAPI !== 'undefined' && GuahhAuthAPI.isLoggedIn()) {
+                                const user = GuahhAuthAPI.getCurrentUser();
+                                if (user && GuahhEngine.setUser) {
+                                    GuahhEngine.setUser({
+                                        displayName: user.displayName,
+                                        username: user.username,
+                                        userId: user.userId
+                                    });
+                                    console.log('[Guahh AI] User context synced:', user.displayName);
+                                }
+                            } else if (attempts < 5) {
+                                // Auth might still be loading user from localStorage
+                                setTimeout(() => syncUserContext(attempts + 1), 300);
+                            }
+                        };
+                        syncUserContext();
                     }
                 }, 300);
             })
@@ -713,6 +764,22 @@ function initAuthUI() {
             // Unlimited Prompts
             if (activeInput) activeInput.placeholder = "Message Guahh AI...";
 
+            // Pass user info to AI engine for personalization
+            // Retry mechanism in case engine isn't ready yet
+            const setUserWithRetry = (retryCount = 0) => {
+                if (window.GuahhEngine && GuahhEngine.setUser && GuahhEngine.isReady) {
+                    GuahhEngine.setUser({
+                        displayName: user.displayName,
+                        username: user.username,
+                        userId: user.userId
+                    });
+                } else if (retryCount < 10) {
+                    // Retry after a delay (engine might still be initializing)
+                    setTimeout(() => setUserWithRetry(retryCount + 1), 200);
+                }
+            };
+            setUserWithRetry();
+
             // Trigger chat sync on login
             syncChatsFromCloud();
         } else {
@@ -723,6 +790,11 @@ function initAuthUI() {
             // Update sidebar text
             if (profileName) profileName.textContent = 'Guest';
             if (profileStatus) profileStatus.textContent = 'Sign in';
+
+            // Clear user context in AI engine
+            if (window.GuahhEngine && GuahhEngine.setUser) {
+                GuahhEngine.setUser(null);
+            }
 
             // Show remaining prompts
             updatePromptCounterUI();
