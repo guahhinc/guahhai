@@ -18,6 +18,10 @@ const MAX_SESSIONS = 50; // Limit to prevent localStorage overflow
 // Chat Sync Configuration
 const CHAT_SYNC_ENABLED = true; // Master toggle for chat sync feature
 const CHAT_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbwLOQB9KizyeOC07kNJHyfq_mRXj1HBWUmgZlzTUK06lcUdbIYXZkPJPpX4OqgyeAFYmg/exec';
+
+// Memory API Configuration
+const MEMORY_API_BASE_URL = 'https://api.ai.guahh.net';
+
 let syncInProgress = false;
 let lastSyncTime = null;
 
@@ -667,8 +671,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 500);
 
     } else {
-        // NORMAL MODE: Fetch full memory
-        fetch('memory.json')
+        // NORMAL MODE: Fetch latest memory
+        fetch(`${MEMORY_API_BASE_URL}/memory/latest`)
             .then(response => {
                 if (!response.ok) throw new Error("Failed to load memory bank");
                 return response.json();
