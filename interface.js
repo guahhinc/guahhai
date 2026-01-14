@@ -404,7 +404,7 @@ function addMessage(text, isUser, skipTyping = false) {
 function typeWriter(element, text) {
     const words = text.split(' '); // Split by words
     let wordIndex = 0;
-    const speed = 70; // Slower speed for "thinking" feel
+    const speed = 30; // Speed per word
 
     function type() {
         if (wordIndex < words.length) {
@@ -424,74 +424,12 @@ function typeWriter(element, text) {
 }
 
 function formatMarkdown(text) {
-    if (!text) return '';
-
-    let processed = text;
-
-    // 1. Extract Closed Code Blocks (```language ... ```)
-    const codeBlocks = [];
-    processed = processed.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        const index = codeBlocks.length;
-        codeBlocks.push({ lang, code });
-        return `__CODE_BLOCK_${index}__`;
-    });
-
-    // 2. Handle Unclosed Code Block at the end (for animation)
-    // If text ends with ```lang ... (and no closing ```)
-    const openBlockMatch = processed.match(/```(\w*)\n([\s\S]*)$/);
-    let openBlockReplacement = '';
-    if (openBlockMatch) {
-        const lang = openBlockMatch[1];
-        const code = openBlockMatch[2];
-        // Remove the raw markdown from processed text so we can append the styled block
-        processed = processed.substring(0, openBlockMatch.index);
-        // Create the styling for the open block
-        const languageClass = lang ? `language-${lang}` : '';
-        openBlockReplacement = `<pre><code class="${languageClass}">${escapeHtml(code)}</code></pre>`;
-    }
-
-    // 3. Inline Code (`...`)
-    const inlineCode = [];
-    processed = processed.replace(/`([^`]+)`/g, (match, code) => {
-        const index = inlineCode.length;
-        inlineCode.push(code);
-        return `__INLINE_CODE_${index}__`;
-    });
-
-    // 4. Basic Formatting
-    processed = processed
-        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Bold
-        .replace(/\*(.*?)\*/g, '<i>$1</i>')     // Italic
-        .replace(/\n/g, '<br>');                 // Newlines
-
-    // 5. Restore Inline Code
-    processed = processed.replace(/__INLINE_CODE_(\d+)__/g, (match, index) => {
-        return `<code class="inline-code">${escapeHtml(inlineCode[index])}</code>`;
-    });
-
-    // 6. Restore Closed Code Blocks
-    processed = processed.replace(/__CODE_BLOCK_(\d+)__/g, (match, index) => {
-        const block = codeBlocks[index];
-        const languageClass = block.lang ? `language-${block.lang}` : '';
-        return `<pre><code class="${languageClass}">${escapeHtml(block.code.trim())}</code></pre>`;
-    });
-
-    // 7. Append the Open Block (if any)
-    processed += openBlockReplacement;
-
-    return processed;
-}
-
-// Helper to prevent HTML injection in code
-function escapeHtml(text) {
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, m => map[m]);
+    // This function is now largely redundant if marked.parse is used directly
+    // Keeping it for potential other uses or if marked.parse isn't always desired.
+    // If marked.parse is used everywhere, this function can be removed.
+    let formatted = text.replace(/\n/g, '<br>');
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    return formatted;
 }
 
 function addTypingIndicator() {
@@ -787,9 +725,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, 300);
             })
             .catch(err => {
-                console.error("Memory Load Error:", err);
-                logToTerminal(`CRITICAL: Failed to load memory banks. ${err.message}`, "error");
-
+                console.error(err);
+                logToTerminal("CRITICAL: Failed to load memory banks.", "error");
+                // Try fallback to old memory.json if index fails? 
+                // Alternatively, just fail. The user specifically asked for this split.
                 logToTerminal("Attempting legacy fallback...", "warning");
                 fetch('memory.json')
                     .then(res => res.json())
@@ -797,22 +736,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         logToTerminal("Legacy memory.json loaded.", "success");
                         GuahhEngine.init(data, logToTerminal);
                     })
-                    .catch(legacyErr => {
-                        console.error("Legacy Load Error:", legacyErr);
-                        logToTerminal("Legacy fallback failed. Initializing minimal core.", "error");
-                        if (window.GuahhEngine) {
-                            GuahhEngine.init([], logToTerminal);
-                            if (statusText) statusText.innerText = 'Guahh AI (Offline Mode)';
-                        }
+                    .catch(e => {
+                        if (statusText) statusText.innerText = 'Error: Memory Missing';
+                        if (activeBtn) activeBtn.disabled = false;
                     });
-            })
-            .catch(e => {
-                if (statusText) statusText.innerText = 'Error: Memory Missing';
-                if (activeBtn) activeBtn.disabled = false;
             });
     }
 });
-
 
 // Feedback Logging (Simplified)
 function logFeedback(query, response, rating) {
