@@ -2415,16 +2415,25 @@ const GuahhEngine = {
                 ];
                 return { text: responses[Math.floor(Math.random() * responses.length)], sources: ["Conversational"] };
             }
-            if (/who.*you/i.test(q)) {
-                return { text: "I'm Guahh AI, your virtual assistant. I can help with analysis, creative writing, coding, and more.", sources: ["Conversational"] };
+            if (/who.*you/i.test(q) || /what.*you/i.test(q) && !/doing/i.test(q)) {
+                return {
+                    text: "I am Guahh AI, a sophisticated virtual assistant designed to help you with coding, creative writing, and complex problem-solving. My goal is to make your work easier and more creative.",
+                    sources: ["Identity Core"]
+                };
             }
 
-            // Randomized Friendly Fallback
+            // Time-Aware & Varied Greetings
+            const hour = new Date().getHours();
+            let timeGreeting = "Hello";
+            if (hour < 12) timeGreeting = "Good morning";
+            else if (hour < 18) timeGreeting = "Good afternoon";
+            else timeGreeting = "Good evening";
+
             const fallbacks = [
-                "Hello! It's great to connect with you. What would you like to explore today?",
-                "Hi there! I'm ready for anything. What's the plan?",
-                "Hey! Good to see you. How can I help?",
-                "Greetings! I'm at your service."
+                `${timeGreeting}! It's great to connect with you. What would you like to explore today?`,
+                "Hello! I'm ready for anything. What's the plan?",
+                "Hey there! Good to see you. How can I help?",
+                "Greetings! I'm at your service for coding, writing, or research."
             ];
             return { text: fallbacks[Math.floor(Math.random() * fallbacks.length)], sources: ["Conversational"] };
         }
@@ -2877,6 +2886,23 @@ const GuahhEngine = {
             }
         }
 
+        // --- CODE GENERATION INTENT ---
+        if (intentAnalysis.primary === 'code' || this.isCodingRequest(effectiveQuery)) {
+            this.onLog("Intent: CODE GENERATION", "process");
+
+            if (typeof GuahhCodingEngine !== 'undefined') {
+                const result = GuahhCodingEngine.processRequest(effectiveQuery, intentAnalysis);
+                this.addToHistory(query, result.text);
+                return result;
+            } else {
+                this.onLog("Coding Engine not found.", "error");
+                return {
+                    text: "I understand you want code, but my Coding Engine module appears to be missing. Please ensure `codingengine.js` is loaded.",
+                    sources: ["System Error"]
+                };
+            }
+        }
+
         // --- EXPANSION / TELL ME MORE ---
         if (intentAnalysis.primary === 'expand' || /tell me more|more detail|go on|elaborate|continue|make.*longer|expand/i.test(effectiveQuery)) {
             this.onLog("Intent: EXPANSION", "process");
@@ -2983,9 +3009,78 @@ const GuahhEngine = {
                 this.addToHistory(query, result.text);
                 return result;
             } else {
-                return { text: "I don't have anything recent to simplify. Could you provide some text?", sources: [] };
+                return { text: "I don't have anything recent to simplify.", sources: [] };
             }
         }
+
+        // --- CREATIVE WRITING INTENT (ESSAYS/STORIES) ---
+        if (intentAnalysis.primary === 'creative' || this.detectQueryType(effectiveQuery) === 'creative') {
+            this.onLog("Intent: CREATIVE WRITING", "process");
+
+            // Extract Topic
+            const topic = this.extractTopic(effectiveQuery) || effectiveQuery.replace(/write|create|make|essay|story|about/gi, '').trim();
+            this.lastTopic = topic;
+            this.lastResponseType = 'CREATIVE';
+
+            // Check if it's an essay or story
+            if (/essay|article|report|paper/i.test(effectiveQuery)) {
+
+                // Search Wikipedia for facts first
+                let context = "";
+                const searchResult = await this.searchWikipedia(topic, false);
+                if (searchResult) context = searchResult;
+
+                const essay = this.generateAdvancedEssay(topic, context);
+                const result = {
+                    text: essay,
+                    sources: context ? ["Creative Engine", "Wikipedia"] : ["Creative Engine"]
+                };
+                this.addToHistory(query, result.text);
+                return result;
+            }
+
+            // Fallback for stories/poems (keep existing logic or add simple one)
+            const creativeText = this.generateCreativeText(topic, effectiveQuery);
+            const result = { text: creativeText, sources: ["Creative Engine"] };
+            this.addToHistory(query, result.text);
+            return result;
+        }
+
+
+        // --- FALLBACK (CONVERSATIONAL) ---
+        this.onLog("Intent: GENERAL CONVERSATION (Fallback)", "info");
+
+        // 1. Check knowledge base
+        const retrieval = this.retrieveKnowledge(effectiveQuery);
+        if (retrieval && retrieval.score > 0.6) {
+            const result = { text: retrieval.answer, sources: ["Memory Bank"] };
+            this.addToHistory(query, result.text);
+            return result;
+        }
+
+        // 2. Intelligent Search Fallback
+        const wikiResult = await this.searchWikipedia(this.extractTopic(effectiveQuery) || effectiveQuery, false);
+        if (wikiResult) {
+            const result = { text: wikiResult, sources: ["Wikipedia"] };
+            this.addToHistory(query, result.text);
+            return result;
+        }
+
+        // 3. Conversational Response (Improvement)
+        const conversationalResponses = [
+            "I'm listening. Could you tell me more about that?",
+            "That's interesting. What else?",
+            "I'm still learning about that topic. Could you explain it to me?",
+            "I see. How does that make you feel?",
+            "Could you elaborate on that?",
+            "I understand. Go on.",
+            "I'm afraid I don't have enough information on that yet. I'm best at Coding, Writing Essays, and answering specific questions!"
+        ];
+
+        return {
+            text: conversationalResponses[Math.floor(Math.random() * conversationalResponses.length)],
+            sources: ["Conversational"]
+        };
 
         // --- CONFUSION / FEEDBACK HANDLING ---
         if (intentAnalysis.primary === 'confusion') {
@@ -4721,5 +4816,104 @@ const GuahhEngine = {
             "I'd love to hear more about your thoughts on this."
         ];
         return templates[Math.floor(Math.random() * templates.length)];
+    },
+
+    // ========== ADVANCED ESSAY ENGINE ==========
+
+    generateAdvancedEssay(topic, context) {
+        this.onLog(`Generating High-Density Essay on: ${topic}`, "process");
+
+        const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+        const title = `The Significance of ${capitalize(topic)}`;
+
+        // 1. Process Context into Data Points
+        let cleanContext = context ? context.replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim() : "";
+        // Split into sentences, handling common abbreviations (basic check)
+        let sentences = cleanContext.match(/[^.!?]+[.!?]+/g) || [];
+        sentences = sentences.map(s => s.trim()).filter(s => s.length > 20); // Filter short garbage
+
+        this.onLog(`Extracted ${sentences.length} fact sentences for essay.`, "data");
+
+        // 2. Distribute Facts (Round Robin Strategy)
+        const facts = {
+            intro: [],
+            history: [],
+            impact: [],
+            future: []
+        };
+
+        // If we have facts, distribute them specific to section if possible (keywords)
+        // Otherwise, simply fill buckets
+        const historyKeywords = /history|origin|began|invented|ancient|century|early|first/i;
+        const impactKeywords = /impact|use|function|role|important|significance|modern|today/i;
+        const futureKeywords = /future|challenge|potential|develop|ongoing|will/i;
+
+        sentences.forEach(s => {
+            if (historyKeywords.test(s)) facts.history.push(s);
+            else if (futureKeywords.test(s)) facts.future.push(s);
+            else if (impactKeywords.test(s)) facts.impact.push(s);
+            else {
+                // Round robin overflow
+                if (facts.intro.length < 2) facts.intro.push(s);
+                else if (facts.history.length < 3) facts.history.push(s);
+                else if (facts.impact.length < 3) facts.impact.push(s);
+                else facts.future.push(s);
+            }
+        });
+
+        // Helper to get a paragraph or fallback
+        const buildPara = (sentences, genericStart, genericEnd) => {
+            if (sentences.length === 0) return `${genericStart} ${genericEnd}`;
+            // Combine sentences with simple transitions if needed, or just flow
+            return `${genericStart} ` + sentences.join(" ") + (sentences.length < 2 ? ` ${genericEnd}` : "");
+        };
+
+        // 3. Construct Sections
+
+        // Introduction
+        const introHook = `The concept of ${topic} is a subject of significant interest.`;
+        const introFacts = facts.intro.length > 0 ? facts.intro.join(" ") : `To understand ${topic}, one must look at its core definition.`;
+        const thesis = `This essay examines the historical background, modern significance, and future outlook of ${topic}.`;
+        const intro = `${introHook} ${introFacts} ${thesis}`;
+
+        // Body 1: History / Background
+        const body1 = buildPara(
+            facts.history,
+            "To begin with, the historical context provides a necessary foundation.",
+            `The origins of ${topic} reveal a progression that has shaped its current state.`
+        );
+
+        // Body 2: Significance / Details
+        const body2 = buildPara(
+            facts.impact,
+            "Furthermore, the significance of this subject is evident in its widespread application.",
+            `It is clear that ${topic} plays a pivotal role in its respective field.`
+        );
+
+        // Body 3: Future / Challenges / Conclusion of Body
+        const body3 = buildPara(
+            facts.future,
+            "However, it is also important to consider the ongoing developments and challenges.",
+            `As time progresses, ${topic} continues to evolve, presenting both new opportunities and complexities.`
+        );
+
+        // Conclusion
+        const conclusionStart = "In conclusion,";
+        const finalSummary = `${topic} remains a dynamic and vital topic.`;
+        const finalThought = facts.intro.length > 0
+            ? `Reflecting on the facts presented, such as ${facts.intro[0].toLowerCase().replace(/[.!?]$/, '')}, we see its enduring value.`
+            : "Detailed analysis confirms its importance in the broader context.";
+
+        const conclusion = `${conclusionStart} ${finalSummary} from its history to its modern impact, it offers valuable insights. ${finalThought}`;
+
+        // Assemble
+        return `## ${title}\n\n${intro}\n\n${body1}\n\n${body2}\n\n${body3}\n\n${conclusion}`;
+    },
+
+    generateCreativeText(topic, query) {
+        // Simple fallback for non-essay creative requests (stories, etc.)
+        const genres = ["Fantasy", "Sci-Fi", "Mystery", "Drama"];
+        const genre = genres[Math.floor(Math.random() * genres.length)];
+        return `## A Story About ${topic}\n\n*(Genre: ${genre})*\n\nOnce upon a time, in a world defined by ${topic}, there was a shifting tide. The air crackled with the energy of ${topic}. It was a day unlike any other... \n\n(To be continued...)`;
     }
 };
