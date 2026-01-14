@@ -284,17 +284,18 @@ const GuahhCodingEngine = {
 <html><head><title>Snake</title><style>body{background:#222;color:#fff;display:flex;flex-direction:column;align-items:center;font-family:sans-serif;} canvas{background:#000;border:2px solid #555;box-shadow:0 0 20px rgba(0,0,0,0.5);}</style></head>
 <body><h2>Snake</h2><canvas id="c" width="400" height="400"></canvas><p>Use Arrow Keys to Move</p>
 <script>
-ctx=c.getContext('2d');snake=[{x:10,y:10}];apple={x:15,y:15};dx=0;dy=0;score=0;
+const c=document.getElementById('c'), ctx=c.getContext('2d');
+let snake=[{x:10,y:10}], apple={x:15,y:15}, dx=0, dy=0, score=0;
 setInterval(()=>{
  snake.unshift({x:snake[0].x+dx,y:snake[0].y+dy});
  if(snake[0].x==apple.x&&snake[0].y==apple.y){apple={x:Math.random()*20|0,y:Math.random()*20|0};score++}else{snake.pop()}
- if(snake[0].x<0||snake[0].x>=20||snake[0].y<0||snake[0].y>=20)snake=[{x:10,y:10}],score=0; // Reset
+ if(snake[0].x<0||snake[0].x>=20||snake[0].y<0||snake[0].y>=20){snake=[{x:10,y:10}];score=0;} // Reset
  ctx.fillStyle='black';ctx.fillRect(0,0,400,400);
  ctx.fillStyle='lime';snake.forEach(p=>ctx.fillRect(p.x*20,p.y*20,18,18));
  ctx.fillStyle='red';ctx.fillRect(apple.x*20,apple.y*20,18,18);
  ctx.fillStyle='white';ctx.fillText('Score: '+score, 10, 20);
 },100);
-window.onkeydown=e=>{k=e.key;if(k=='ArrowUp'&&dy!=1)dy=-1,dx=0;if(k=='ArrowDown'&&dy!=-1)dy=1,dx=0;if(k=='ArrowLeft'&&dx!=1)dx=-1,dy=0;if(k=='ArrowRight'&&dx!=-1)dx=1,dy=0;}
+window.onkeydown=e=>{const k=e.key;if(k=='ArrowUp'&&dy!=1){dy=-1;dx=0}if(k=='ArrowDown'&&dy!=-1){dy=1;dx=0}if(k=='ArrowLeft'&&dx!=1){dx=-1;dy=0}if(k=='ArrowRight'&&dx!=-1){dx=1;dy=0}}
 </script></body></html>`
                 })
             },
@@ -401,8 +402,8 @@ window.onkeydown=()=>{spawn();draw();}
 <h2>Pong</h2>
 <canvas id="c" width="600" height="400" style="border:2px solid #fff;"></canvas>
 <script>
-c=document.getElementById('c');x=c.getContext('2d');
-bx=300;by=200;bdx=3;bdy=3;py=150;aiy=150;
+const c=document.getElementById('c'), x=c.getContext('2d');
+let bx=300, by=200, bdx=3, bdy=3, py=150, aiy=150;
 setInterval(()=>{
  bx+=bdx;by+=bdy;
  if(by<0||by>400)bdy=-bdy;
