@@ -2891,15 +2891,21 @@ const GuahhEngine = {
             this.onLog("Intent: CODE GENERATION", "process");
 
             if (typeof GuahhCodingEngine !== 'undefined') {
-                const result = GuahhCodingEngine.processRequest(effectiveQuery, intentAnalysis);
-                this.addToHistory(query, result.text);
-                return result;
+                try {
+                    const result = GuahhCodingEngine.processRequest(effectiveQuery, intentAnalysis);
+                    this.addToHistory(query, result.text);
+                    return result;
+                } catch (codeError) {
+                    this.onLog(`Coding Engine Crash: ${codeError.message}`, "error");
+                    return { text: "I attempted to write code but the coding engine encountered an internal error. Please check the logs.", sources: ["System Error"] };
+                }
             } else {
-                this.onLog("Coding Engine not found.", "error");
+                this.onLog("GuahhCodingEngine is missing!", "error");
                 return {
-                    text: "I understand you want code, but my Coding Engine module appears to be missing. Please ensure `codingengine.js` is loaded.",
+                    text: "I cannot generate code because the **Coding Engine module** failed to load. This may be due to a browser cache issue or a file error. Please try refreshing the page.",
                     sources: ["System Error"]
                 };
+
             }
         }
 
@@ -3051,9 +3057,13 @@ const GuahhEngine = {
         this.onLog("Intent: GENERAL CONVERSATION (Fallback)", "info");
 
         // 1. Check knowledge base
-        const retrieval = this.retrieveKnowledge(effectiveQuery);
-        if (retrieval && retrieval.score > 0.6) {
-            const result = { text: retrieval.answer, sources: ["Memory Bank"] };
+
+        const fallbackRetrievalTokens = this.tokenize(effectiveQuery);
+        const fallbackRelevantDocs = this.retrieveRelevant(fallbackRetrievalTokens);
+
+        if (fallbackRelevantDocs.length > 0 && fallbackRelevantDocs[0].score > 0.6) {
+            const bestMatch = fallbackRelevantDocs[0];
+            const result = { text: bestMatch.doc.a, sources: ["Memory Bank"] };
             this.addToHistory(query, result.text);
             return result;
         }
