@@ -299,11 +299,9 @@ const GuahhEngine = {
     },
 
     sanitizeInput(query) {
-        // Remove emojis and other non-standard text characters that might break regex or processing
-        // Keep alphanumeric, punctuation, and basic symbols
+        // Remove emojis and specific control characters
         if (!query) return "";
         return query.replace(/[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')
-            .replace(/[^\x00-\x7F]+/g, '') // Aggressive: remove all non-ASCII for now to be safe
             .trim();
     },
 
@@ -384,30 +382,103 @@ const GuahhEngine = {
     },
 
     isMathQuery(query) {
-        const mathPatterns = [
-            /^[\d\s+\-*/().^√]+$/,
-            /^\d+\s*[+\-*/^]\s*\d+/,
-            /what is \d+.*\d+/i,
-            /(calculate|compute|solve).*\d+/i,
-            /\d+\s*(plus|minus|times|divided by|multiplied by)\s*\d+/i
-        ];
-        return mathPatterns.some(p => p.test(query));
+        const clean = query.toLowerCase();
+        // Check for specific math operators or keywords combined with numbers
+        // Must contain numbers AND operators to be a math query
+        const hasNumbers = /\d/.test(clean);
+        const hasOperators = /[\+\-\*\/^]|\b(plus|minus|times|divided by|multiplied by|squared|cubed)\b/.test(clean);
+
+        if (hasNumbers && hasOperators) {
+            // Ensure it's not a date "1990-2000" or phone number
+            // It should look like a calculation
+            return true;
+        }
+
+        // Simple "calculate X" check
+        if (/^(calculate|compute|solve)\s+.+/.test(clean)) return true;
+
+        return false;
+    },
+
+    evaluateExpression(expr) {
+        try {
+            // Clean up the expression
+            let cleanExpr = expr.toLowerCase()
+                .replace(/what is\s*/i, '').replace(/calculate\s*/i, '').replace(/compute\s*/i, '').replace(/solve\s*/i, '')
+                .replace(/\btimes\b/g, '*').replace(/\bmultiplied by\b/g, '*')
+                .replace(/\bdivided by\b/g, '/')
+                .replace(/\bplus\b/g, '+').replace(/\bminus\b/g, '-')
+                .replace(/\bsquared\b/g, '**2').replace(/\bcubed\b/g, '**3')
+                .replace(/\^/g, '**').replace(/√(\d+)/g, 'Math.sqrt($1)')
+                .replace(/[^\d\s+\-*/().*]|(?<!Math)\./g, '') // strictly allow only math chars
+                .trim();
+
+            if (!cleanExpr || !/^[\d\s+\-*/().*]+$/.test(cleanExpr) || !/\d/.test(cleanExpr)) return null;
+
+            // Safe evaluation using Function
+            const result = Function('"use strict"; return (' + cleanExpr + ')')();
+
+            if (isNaN(result) || !isFinite(result)) return null;
+            return { expr: cleanExpr, result: Number.isInteger(result) ? result : result.toFixed(4) };
+        } catch (e) { return null; }
     },
 
     calculateMath(query) {
-        try {
-            let expr = query.toLowerCase()
-                .replace(/what is\s*/i, '').replace(/calculate\s*/i, '').replace(/compute\s*/i, '').replace(/solve\s*/i, '')
-                .replace(/\btimes\b/g, '*').replace(/\bmultiplied by\b/g, '*').replace(/\bdivided by\b/g, '/')
-                .replace(/\bplus\b/g, '+').replace(/\bminus\b/g, '-')
-                .replace(/\bsquared\b/g, '**2').replace(/\bcubed\b/g, '**3').replace(/\^/g, '**').replace(/√(\d+)/g, 'Math.sqrt($1)')
-                .trim();
-            if (!/^[\d\s+\-*/().\*]+$/.test(expr.replace(/Math\.sqrt\(\d+\)/g, '0'))) return null;
-            const result = Function('"use strict"; return (' + expr + ')')();
-            if (isNaN(result) || !isFinite(result)) return null;
-            const formatted = Number.isInteger(result) ? result : result.toFixed(4);
-            return `The answer is ${formatted}`;
-        } catch (e) { return null; }
+        // check for multiple distinct queries
+        // Split by 'and', commas, semicolons, OR spaces if they look like separate math expressions
+        // The regex looks for:
+        // 1. "and", ",", ";" delimiters
+        // 2. OR a space that is likely a separator between two math expressions (e.g. "1+2 3+4")
+        //    (Lookbehind for digit, lookahead for digit, but space in between)
+
+        // Let's refine the splitting logic.
+        // We want to split string "1+2 4*8 5/2" into ["1+2", "4*8", "5/2"]
+        // But "calculate 5 + 5" should be ["5 + 5"]
+
+        let cleaned = query.toLowerCase()
+            .replace(/what is|calculate|compute|solve/gi, '')
+            .trim();
+
+        // If we just use spaces as delimiters, we break "5 + 5".
+        // But if we first normalize the expression to REMOVE spaces around operators, 
+        // e.g. "5 + 5" -> "5+5", then we CAN split by space.
+
+        // 1. Normalize spacing around operators
+        cleaned = cleaned.replace(/\s*([\+\-\*\/^])\s*/g, '$1');
+
+        // 2. Also normalize word operators
+        cleaned = cleaned
+            .replace(/\s+plus\s+/g, '+')
+            .replace(/\s+minus\s+/g, '-')
+            .replace(/\s+times\s+/g, '*')
+            .replace(/\s+divided by\s+/g, '/')
+            .replace(/\s+multiplied by\s+/g, '*');
+
+        // 3. Now split by space, comma, semicolon, or 'and'
+        const parts = cleaned.split(/[\s,;]+|\band\b/i).map(p => p.trim()).filter(p => p.length > 0);
+
+        const results = [];
+
+        for (const part of parts) {
+            const result = this.evaluateExpression(part);
+            if (result) {
+                results.push(result);
+            }
+        }
+
+        if (results.length === 0) return null;
+
+        if (results.length === 1) {
+            return `The answer is ${results[0].result}`;
+        }
+
+        // Multiple results
+        let response = "Here are the answers:\n\n";
+        results.forEach((res) => {
+            response += `• ${res.expr} = **${res.result}**\n`;
+        });
+
+        return response;
     },
 
     isGreeting(query) {
@@ -1924,6 +1995,10 @@ const GuahhEngine = {
         // Learning and education
         if (/learn|study|course|skill|topic|subject/i.test(t)) return 'learning';
 
+        // Travel and exploration
+        if (/travel|trip|vacation|holiday|visit|tour|destination|explore/i.test(t)) return 'travel';
+
+
         // Default
         return 'general';
     },
@@ -1946,6 +2021,8 @@ const GuahhEngine = {
                 return this.generateProductIdea(topic, index);
             case 'learning':
                 return this.generateLearningIdea(topic, index);
+            case 'travel':
+                return this.generateTravelIdea(topic, index);
             default:
                 return this.generateGeneralIdea(topic, index);
         }
@@ -2066,6 +2143,20 @@ const GuahhEngine = {
         return templates[index % templates.length];
     },
 
+    generateTravelIdea(topic, index) {
+        const types = ['road trip', 'backpacking adventure', 'luxury retreat', 'cultural immersion', 'eco-tourism', 'city break'];
+        const activities = ['local cuisine tasting', 'hiking hidden trails', 'historical sightseeing', 'meeting locals', 'photography tour', 'relaxation'];
+
+        const templates = [
+            `Plan a ${types[index % types.length]} focused on ${activities[index % activities.length]}`,
+            `Explore ${topic} through a ${types[(index + 1) % types.length]} lens`,
+            `Combine ${activities[(index + 2) % activities.length]} with a ${types[(index + 2) % types.length]} in ${topic}`,
+            `Discover the hidden gems of ${topic} on a ${types[(index + 3) % types.length]}`
+        ];
+
+        return templates[index % templates.length];
+    },
+
     generateGeneralIdea(topic, index) {
         const approaches = ['innovative', 'community-driven', 'sustainable', 'technology-enhanced', 'collaborative', 'experimental'];
         const actions = ['platform', 'initiative', 'project', 'movement', 'solution', 'approach'];
@@ -2121,6 +2212,128 @@ const GuahhEngine = {
         const o = outputs[Math.floor(Math.random() * outputs.length)];
 
         return `**Fusion Concept**: A unique ${o} that uses **${d}** principles to **${a}** the experience of ${topic}.`;
+    },
+
+    generateBrainstormIdeas(topic) {
+        // Detect topic type
+        const t = topic.toLowerCase();
+        let type = 'general';
+
+        if (/fashion|clothes|wear|outfit|style|dress|shirt|shoes/i.test(t)) type = 'fashion';
+        else if (/food|cook|recipe|dinner|lunch|meal|eat|diet/i.test(t)) type = 'food';
+        else if (/hobby|activity|fun|weekend|time|learn/i.test(t)) type = 'activity';
+        else if (/business|startup|company|market|sell|money/i.test(t)) type = 'business';
+        else if (/app|software|tech|code|program|web|site/i.test(t)) type = 'tech';
+        else if (/story|plot|character|write|novel|book/i.test(t)) type = 'creative';
+        else if (/product|invent|device|gadget/i.test(t)) type = 'product';
+        else if (/course|teach|class|study|education/i.test(t)) type = 'learning';
+        else if (/travel|trip|vacation|holiday/i.test(t)) type = 'travel';
+
+        // Generate 4 distinct ideas
+        let ideas = [];
+        for (let i = 0; i < 4; i++) {
+            // Mix specific type ideas with one "custom" creative idea
+            if (i === 3) {
+                ideas.push(`* ${this.generateCustomBrainstormIdea(topic)}`);
+            } else {
+                ideas.push(`* ${this.generateContextualIdea(topic, type, i)}`);
+            }
+        }
+
+        return ideas.join('\n\n');
+    },
+
+    paraphraseText(text, style = 'neutral') {
+        if (!text) return "";
+
+        // Concise / Summarize
+        if (style === 'concise') {
+            return this.summarizeText(text);
+        }
+
+        // Elaborate / Detail
+        if (style === 'elaborate') {
+            // Try to add knowledge-based details
+            const keywords = this.extractKeywords(text);
+            let addedDetail = "";
+
+            // Try to find relevant info for the top keyword
+            if (keywords.length > 0) {
+                const bestKeyword = keywords[0]; // Assume first is most important
+                const tokens = this.tokenize(bestKeyword);
+                const docs = this.retrieveRelevant(tokens);
+
+                // Lowered threshold to 0.25 to catch more relevant info
+                if (docs.length > 0 && docs[0].score > 0.25) {
+                    addedDetail = docs[0].doc.a;
+                }
+            }
+
+            // Expand the text itself (simple heuristics)
+            let expanded = text
+                .replace(/\b(it's)\b/gi, "it is")
+                .replace(/\b(can't)\b/gi, "cannot")
+                .replace(/\b(won't)\b/gi, "will not")
+                .replace(/\b(don't)\b/gi, "do not")
+                .replace(/\b(I'm)\b/gi, "I am")
+                .replace(/\b(good)\b/gi, "excellent and beneficial")
+                .replace(/\b(bad)\b/gi, "suboptimal and unfavorable")
+                .replace(/\b(big)\b/gi, "significant and substantial")
+                .replace(/\b(important)\b/gi, "crucial and noteworthy");
+
+            if (addedDetail && !expanded.includes(addedDetail.substring(0, 20))) {
+                return `${expanded}\n\n**Additional Context:** ${addedDetail}`;
+            }
+            return expanded;
+        }
+
+        // Formal
+        if (style === 'formal' || style === 'academic') {
+            return text
+                .replace(/\b(can't)\b/gi, "cannot")
+                .replace(/\b(won't)\b/gi, "will not")
+                .replace(/\b(don't)\b/gi, "do not")
+                .replace(/\b(doesn't)\b/gi, "does not")
+                .replace(/\b(I'm)\b/gi, "I am")
+                .replace(/\b(you're)\b/gi, "you are")
+                .replace(/\b(kids)\b/gi, "children")
+                .replace(/\b(guy|dude)\b/gi, "individual")
+                .replace(/\b(awesome|cool)\b/gi, "remarkable")
+                .replace(/\b(get)\b/gi, "obtain")
+                .replace(/\b(need)\b/gi, "require")
+                // Replace exclamation marks with periods for formal tone, except in quotes
+                .replace(/!/g, ".");
+        }
+
+        // Casual
+        if (style === 'casual' || style === 'witty') {
+            return text
+                .replace(/\b(cannot)\b/gi, "can't")
+                .replace(/\b(will not)\b/gi, "won't")
+                .replace(/\b(do not)\b/gi, "don't")
+                .replace(/\b(does not)\b/gi, "doesn't")
+                .replace(/\b(I am)\b/gi, "I'm")
+                .replace(/\b(you are)\b/gi, "you're")
+                .replace(/\b(children)\b/gi, "kids")
+                .replace(/\b(hello)\b/gi, "hey")
+                .replace(/\b(yes)\b/gi, "yep")
+                .replace(/\b(no)\b/gi, "nope");
+        }
+
+        // Simple
+        if (style === 'simple') {
+            return text
+                .replace(/\b(utilize)\b/gi, "use")
+                .replace(/\b(assist)\b/gi, "help")
+                .replace(/\b(commence)\b/gi, "start")
+                .replace(/\b(terminate)\b/gi, "end")
+                .replace(/\b(sufficient)\b/gi, "enough")
+                .replace(/\b(incorrect)\b/gi, "wrong")
+                .replace(/\b(demonstrate)\b/gi, "show")
+                .replace(/\b(construct)\b/gi, "build");
+        }
+
+        return text;
     },
 
     // ========== CONVERSATIONAL ENGINE ==========
@@ -2910,7 +3123,7 @@ const GuahhEngine = {
                 brainstormTopic = topic || 'general concepts';
             }
 
-            const ideas = this.generateBrainstormIdeas(brainstormTopic);
+            let ideas = this.generateBrainstormIdeas(brainstormTopic);
 
             // If topic is valid, maybe include a Fusion Idea for flavor
             if (brainstormTopic.length > 3 && Math.random() > 0.5) {

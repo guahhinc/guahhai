@@ -490,7 +490,7 @@ function handleFeedback(clickedBtn, otherBtn, query, response, rating) {
     // If negative feedback, show refinement options
     if (rating === 'bad') {
         console.log("Feedback logged: User disliked response");
-        showFeedbackOptions(clickedBtn.parentNode, query, response);
+        // Removed detailed feedback options as per user request
     }
 }
 
@@ -667,17 +667,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 500);
 
     } else {
-        // NORMAL MODE: Fetch full memory
-        fetch('memory.json')
+        // NORMAL MODE: Fetch full memory (Multi-file)
+        logToTerminal("Loading memory index...", "process");
+
+        fetch('memory_index.json')
             .then(response => {
-                if (!response.ok) throw new Error("Failed to load memory bank");
+                if (!response.ok) throw new Error("Failed to load memory index");
                 return response.json();
             })
-            .then(data => {
-                logToTerminal("Memory bank loaded successfully.", "success");
+            .then(maxFiles => {
+                logToTerminal(`Found ${maxFiles.length} memory banks. Loading...`, "info");
+
+                // Load all memory files
+                const promises = maxFiles.map(filename =>
+                    fetch(filename)
+                        .then(res => res.json())
+                        .catch(err => {
+                            console.warn(`Failed to load ${filename}:`, err);
+                            return []; // Return empty array on failure to preserve others
+                        })
+                );
+
+                return Promise.all(promises);
+            })
+            .then(results => {
+                // Combine all arrays
+                const combinedData = results.flat();
+                const totalEntries = combinedData.length;
+                const totalSizeMB = (new Blob([JSON.stringify(combinedData)]).size / (1024 * 1024)).toFixed(2);
+
+                logToTerminal(`Memory banks loaded: ${totalEntries} entries (~${totalSizeMB} MB).`, "success");
+
                 setTimeout(() => {
                     if (window.GuahhEngine) {
-                        GuahhEngine.init(data, logToTerminal);
+                        GuahhEngine.init(combinedData, logToTerminal);
                         if (statusText) statusText.innerText = 'Guahh AI 1 (a)';
 
                         // Set user context if already logged in (with retry for async auth loading)
@@ -703,9 +726,20 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(err => {
                 console.error(err);
-                logToTerminal("CRITICAL: Failed to load memory.json.", "error");
-                if (statusText) statusText.innerText = 'Error: Memory Missing';
-                if (activeBtn) activeBtn.disabled = false;
+                logToTerminal("CRITICAL: Failed to load memory banks.", "error");
+                // Try fallback to old memory.json if index fails? 
+                // Alternatively, just fail. The user specifically asked for this split.
+                logToTerminal("Attempting legacy fallback...", "warning");
+                fetch('memory.json')
+                    .then(res => res.json())
+                    .then(data => {
+                        logToTerminal("Legacy memory.json loaded.", "success");
+                        GuahhEngine.init(data, logToTerminal);
+                    })
+                    .catch(e => {
+                        if (statusText) statusText.innerText = 'Error: Memory Missing';
+                        if (activeBtn) activeBtn.disabled = false;
+                    });
             });
     }
 });
