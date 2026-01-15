@@ -10,6 +10,7 @@ const GuahhEngine = {
     idf: {},
     isReady: false,
     lastTopic: null,
+    lastEssayContext: null, // Stores context for essay feedback loop
     emotion: "neutral", // Current emotional state
     region: "AU", // Default region for spelling/tone
     onLog: function (msg, type) { console.log(`[${type || 'info'}] ${msg}`); },
@@ -503,7 +504,7 @@ const GuahhEngine = {
         let topic = null;
 
         // Specific pattern matching
-        let match = clean.match(/(?:write|make|create|generate)\s+(?:a|an|the)?\s*(?:story|letter|email|essay|article|poem|song|paragraph|report)\s+(?:about|on|regarding|to|for)\s+(?:the\s+)?(.+)/i);
+        let match = clean.match(/(?:write|make|create|generate)\s+(?:a|an|the)?\s*(?:story|letter|email|essay|article|poem|song|paragraph|sentence|statement|report)\s+(?:about|on|regarding|to|for)\s+(?:the\s+)?(.+)/i);
         if (match) topic = match[1].trim();
 
         // Government/political patterns (NEW - handles "structure of X government")
@@ -797,6 +798,11 @@ const GuahhEngine = {
         // Simplification intent
         if (/(simplify|simpler|easier|eli5|explain like|dumb.*down|basic|too complex)/i.test(q)) {
             intents.push({ type: 'simplify', confidence: 0.9 });
+        }
+
+        // Summarization intent
+        if (/(summaris|summariz|sum up|tldr|brief|shorten|gist)/i.test(q)) {
+            intents.push({ type: 'summarize', confidence: 0.95 });
         }
 
         // === PROCEDURE INTENTS ===
@@ -2779,6 +2785,21 @@ const GuahhEngine = {
             this.onLog(`Secondary Intents: ${intentAnalysis.secondary.join(', ')}`, "info");
         }
 
+        // --- ESSAY FEEDBACK & REFINEMENT (CRITICAL PRIORITY) ---
+        // Must check this FIRST to prevent "Paraphrase" or "Expand" from intercepting "make it longer"
+        // Only active if we have a valid essay context from a previous turn
+        if (this.lastEssayContext && this.isContextualFollowUp(effectiveQuery)) {
+            // Check if user is asking for a change to the essay
+            // Expanded regex to catch more natural language feedback
+            if (/change|make|rewrite|edit|too|more|less|style|tone|longer|shorter|funnier|better|fix|different/i.test(effectiveQuery)) {
+                this.onLog("Intent: ESSAY REFINEMENT (Priority Override)", "process");
+                const newEssay = this.refineEssay(effectiveQuery);
+                const result = { text: newEssay, sources: ["Creative Engine (Refined)"] };
+                this.addToHistory(query, result.text);
+                return result;
+            }
+        }
+
         // === PRIORITY HANDLING FOR PENDING QUESTIONS ===
         // If the AI previously asked a question, prioritize confirmation/negation over other intents
         // Example: "Yes thank you" -> detected as Gratitude (primary) but is actually an Answer (secondary)
@@ -3196,6 +3217,8 @@ const GuahhEngine = {
             }
         }
 
+        // --- ESSAY FEEDBACK & REFINEMENT MOVED TO TOP OF FUNCTION ---
+
         // --- CREATIVE WRITING INTENT (ESSAYS/STORIES) ---
         if (intentAnalysis.primary === 'creative' || this.detectQueryType(effectiveQuery) === 'creative') {
             this.onLog("Intent: CREATIVE WRITING", "process");
@@ -3206,6 +3229,42 @@ const GuahhEngine = {
             this.lastResponseType = 'CREATIVE';
 
             // Check if it's an essay or story
+            // GRANULARITY CHECK: Sentence
+            if (/write.*sentence|give.*sentence|make.*sentence|one sentence/i.test(effectiveQuery)) {
+                this.onLog("Detected Granularity: SENTENCE", "info");
+
+                // Search Wikipedia for facts if needed
+                let context = "";
+                const searchResult = await this.searchWikipedia(topic, false);
+                if (searchResult) context = searchResult;
+
+                const sentence = this.generateSentence(topic, context);
+                const result = {
+                    text: sentence,
+                    sources: context ? ["Creative Engine", "Wikipedia"] : ["Creative Engine"]
+                };
+                this.addToHistory(query, result.text);
+                return result;
+            }
+
+            // GRANULARITY CHECK: Paragraph
+            if (/write.*paragraph|give.*paragraph|make.*paragraph|one paragraph/i.test(effectiveQuery)) {
+                this.onLog("Detected Granularity: PARAGRAPH", "info");
+
+                // Search Wikipedia for facts first
+                let context = "";
+                const searchResult = await this.searchWikipedia(topic, false);
+                if (searchResult) context = searchResult;
+
+                const paragraph = this.generateParagraph(topic, context);
+                const result = {
+                    text: paragraph,
+                    sources: context ? ["Creative Engine", "Wikipedia"] : ["Creative Engine"]
+                };
+                this.addToHistory(query, result.text);
+                return result;
+            }
+
             if (/essay|article|report|paper/i.test(effectiveQuery)) {
 
                 // Search Wikipedia for facts first
@@ -3299,15 +3358,63 @@ const GuahhEngine = {
             }
         }
 
-        // --- ELABORATION / FOLLOW-UP HANDLING ---
-        if (intentAnalysis.primary === 'expand' || intentAnalysis.primary === 'followup') {
-            this.onLog("Intent: ELABORATION", "process");
-            // If we have a topic, treat it like a search or detailed general query about that topic
-            if (topic) {
-                // For now, we can route this to the Wikipedia search or general generation
-                // But strictly looking for "more info"
-                this.onLog(`Elaborating on: ${topic}`, "info");
-                // Let it fall through to search/general generation with the RESOLVED query (e.g. "tell me more about [topic]")
+        // --- ELABORATION & MODIFICATION HANDLING ---
+        if (['expand', 'simplify', 'summarize'].includes(intentAnalysis.primary)) {
+            this.onLog(`Intent: MODIFICATION (${intentAnalysis.primary})`, "process");
+
+            if (!this.lastTopic && !this.recentOutputs.length) {
+                return { text: "I'm not sure what you'd like me to modify. Could you be more specific?", sources: ["System"] };
+            }
+
+            // 1. SUMMARIZE
+            if (intentAnalysis.primary === 'summarize') {
+                const lastOutput = this.recentOutputs[this.recentOutputs.length - 1];
+                if (lastOutput) {
+                    const summary = this.summarizeText(lastOutput); // Utilize existing summarizeText function
+                    const result = { text: `Here is a summary:\n\n${summary}`, sources: ["Summarizer"] };
+                    this.addToHistory(query, result.text);
+                    return result;
+                }
+            }
+
+            // 2. EXPAND / MAKE IT LONGER
+            if (intentAnalysis.primary === 'expand') {
+                const topic = this.lastTopic || this.extractTopic(effectiveQuery);
+                if (topic) {
+                    this.onLog(`Expanding on: ${topic}`, "info");
+
+                    // Fetch context again to ensure quality
+                    let context = "";
+                    const searchResult = await this.searchWikipedia(topic, false);
+                    if (searchResult) context = searchResult;
+
+                    // Generate a LONG essay (800 words target)
+                    const essay = this.generateAdvancedEssay(topic, context, 800);
+                    const result = {
+                        text: `Here is a more detailed version:\n\n${essay}`,
+                        sources: ["Essay Engine (Extended)"]
+                    };
+                    this.addToHistory(query, result.text);
+                    return result;
+                }
+            }
+
+            // 3. SIMPLIFY
+            if (intentAnalysis.primary === 'simplify') {
+                const topic = this.lastTopic || this.extractTopic(effectiveQuery);
+                if (topic) {
+                    // For simplification, we can use a "Student" or "Storyteller" persona but with specific instructions?
+                    // Or just generate a shorter, simpler explanation.
+                    // Let's use `generateNeuralText` with a simple prompt prefix or just a short essay.
+                    const simpleText = `In simple terms, ${topic} is... ` + this.generateBrainstormIdeas(topic).slice(0, 200); // Fallback
+                    // Actually, let's use the essay engine but small and maybe 'storyteller' style is simpler?
+                    // Or just call generateParagraph which is shorter.
+
+                    const para = this.generateParagraph(topic, "simple");
+                    const result = { text: `Simply put:\n\n${para}`, sources: ["Simplifier"] };
+                    this.addToHistory(query, result.text);
+                    return result;
+                }
             }
         }
 
@@ -3981,13 +4088,53 @@ const GuahhEngine = {
         return seed + "\n\n" + this.generateNeuralText(sourceText, targetLength);
     },
 
+    // ========== GRANULAR GENERATION SYSTEM ==========
+
+    generateSentence(topic, context = "") {
+        // Generates a single, high-quality sentence about the topic
+        const starters = [
+            `${this.capitalizeProperNouns(topic)} is defined by its ability to`,
+            `At the core of ${topic} lies`,
+            `${this.capitalizeProperNouns(topic)} serves as a reminder that`,
+            `The concept of ${topic} involves`,
+            `When considering ${topic}, we find that`,
+            `${this.capitalizeProperNouns(topic)} represents`
+        ];
+
+        // If we have context, try to extract a real fact
+        if (context) {
+            const sentences = context.split(/[.!?]+/).filter(s => s.trim().length > 15 && s.trim().length < 120);
+            if (sentences.length > 0) {
+                // Return a clean version of the first good sentence
+                return sentences[0].trim() + ".";
+            }
+        }
+
+        // Fallback to generative construction
+        const seed = starters[Math.floor(Math.random() * starters.length)];
+        return this.generateNeuralText(seed + " " + context.substring(0, 100), 20);
+    },
+
+    generateParagraph(topic, context = "") {
+        // Generates a standalone paragraph
+        // We can reuse generateBodyPoint but we need a "point" first
+        const point = this.generateBodyPoint(topic, context, Math.floor(Math.random() * 5));
+
+        // Generate the paragraph using the point
+        // index 0 usually gives a good general introduction style
+        return this.generateBodyParagraph(topic, context, point, 0);
+    },
+
     // ========== ADVANCED ESSAY WRITING SYSTEM ==========
 
-    generateAdvancedEssay(topic, wikiContext = "", targetWordCount = 350, style = 'academic') {
-        this.onLog(`Generating advanced essay on "${topic}" (${targetWordCount} words, ${style} style)`, "process");
+    generateAdvancedEssay(topic, wikiContext = "", targetWordCount = 350, style = null) {
+        // Select specific essay persona/style here to persist through all steps
+        const essayStyle = style || this.determineStyleFromTopic(topic);
+
+        this.onLog(`Generating advanced essay on "${topic}" (${targetWordCount} words, Persona: ${essayStyle.toUpperCase()})`, "process");
 
         // Step 1: Create essay outline
-        const outline = this.generateEssayOutline(topic, wikiContext, targetWordCount);
+        const outline = this.generateEssayOutline(topic, wikiContext, targetWordCount, essayStyle);
 
         // Step 2: Generate introduction
         const intro = this.generateIntroduction(topic, wikiContext, outline);
@@ -4002,209 +4149,525 @@ const GuahhEngine = {
         let essay = `${intro}\n\n${body}\n\n${conclusion}`;
         essay = this.applyHumanLikeVariations(essay, topic);
 
+        // Save context for feedback
+        this.lastEssayContext = {
+            topic: topic,
+            style: essayStyle,
+            wikiContext: wikiContext,
+            essay: essay
+        };
+
         this.onLog(`Essay generated: ${essay.split(' ').length} words`, "success");
         return essay;
     },
 
-    generateEssayOutline(topic, wikiContext, targetWordCount) {
+    determineStyleFromTopic(topic) {
+        const t = topic.toLowerCase();
+
+        // Historian: historical, past, ancient, origin, war, empire
+        if (/\b(history|ancient|origin|past|war|empire|century|era|civilization|founded|ago)\b/.test(t)) return 'historian';
+
+        // Futurist: future, technology, ai, space, robot, next, upcoming, prediction, 20[3-9][0-9]
+        if (/\b(future|tech|ai|space|robot|mars|moon|prediction|upcoming|next|generation|cyber)\b/.test(t)) return 'futurist';
+
+        // Critic: controversial, debate, problem, issue, bad, good, review, opinion, vs, versus
+        if (/\b(controversy|debate|problem|issue|bad|good|review|opinion|vs|versus|pros|cons)\b/.test(t)) return 'critic';
+
+        // Storyteller: life, biography, story, person, journey, love, death, personal
+        if (/\b(life|biography|story|person|journey|love|death|personal|memoir|adventure)\b/.test(t)) return 'storyteller';
+
+        // Persuasive: why, should, must, importance, benefit
+        if (/\b(why|should|must|importance|benefit|reason|argue|persuade)\b/.test(t)) return 'persuasive';
+
+        // Descriptive: describe, look, appearance, beauty, scene
+        if (/\b(describe|look|appearance|beauty|scene|nature|place)\b/.test(t)) return 'descriptive';
+
+        // Default to Analyst for general topics (science, facts, objects)
+        return 'analyst';
+    },
+
+    refineEssay(feedback) {
+        if (!this.lastEssayContext) {
+            return "I can't edit an essay I haven't written yet. Try asking me to write one first!";
+        }
+
+        try {
+            const { topic } = this.lastEssayContext;
+            const wikiContext = this.lastEssayContext.wikiContext || "";
+            let { style } = this.lastEssayContext;
+            let wordCount = 350;
+
+            const f = feedback.toLowerCase();
+
+            // Style changes
+            if (f.includes('funny') || f.includes('joke') || f.includes('humor')) style = 'storyteller';
+            if (f.includes('serious') || f.includes('formal') || f.includes('professional')) style = 'analyst';
+            if (f.includes('creative') || f.includes('story')) style = 'storyteller';
+            if (f.includes('excited') || f.includes('hype')) style = 'futurist';
+            if (f.includes('critic') || f.includes('negative') || f.includes('debate')) style = 'critic';
+
+            // Length changes
+            if (f.includes('longer') || f.includes('detailed') || f.includes('more')) wordCount = 700; // Increased to ensure length
+            if (f.includes('shorter') || f.includes('brief') || f.includes('concise')) wordCount = 200;
+
+            this.safeLog(`Refining essay based on feedback: "${feedback}" -> New Style: ${style}, Length: ${wordCount}`, "info");
+
+            return this.generateAdvancedEssay(topic, wikiContext, wordCount, style);
+        } catch (error) {
+            this.safeLog(`Error in refineEssay: ${error.message}`, "error");
+            return "I tried to rewrite the essay, but I ran into a bit of trouble. Could you try asking me to write a new one instead?";
+        }
+    },
+
+    safeLog(msg, type) {
+        try {
+            if (this.onLog) this.onLog(msg, type);
+        } catch (e) {
+            console.log(`[SafeLog Fail] ${msg}`);
+        }
+    },
+
+    generateEssayOutline(topic, wikiContext, targetWordCount, essayStyle = 'analyst') {
         // Determine number of body paragraphs based on word count
-        const numBodyParagraphs = Math.max(2, Math.min(5, Math.floor(targetWordCount / 120)));
+        // Increased max from 5 to 8, and lowered threshold to 100 to push for length
+        const numBodyParagraphs = Math.max(3, Math.min(8, Math.floor(targetWordCount / 100)));
 
         const outline = {
-            thesis: this.generateThesis(topic, wikiContext),
+            _style: essayStyle, // Store style for later use
+            thesis: this.generateThesis(topic, wikiContext, essayStyle),
             bodyPoints: [],
             conclusionPoint: null
         };
 
-        // Generate main points for body paragraphs
+        // Generate main points for body paragraphs based on style
         for (let i = 0; i < numBodyParagraphs; i++) {
-            outline.bodyPoints.push(this.generateBodyPoint(topic, wikiContext, i));
+            outline.bodyPoints.push(this.generateBodyPoint(topic, wikiContext, i, essayStyle));
         }
 
-        outline.conclusionPoint = `Summarize the significance of ${topic} and its broader implications`;
+        outline.conclusionPoint = `Summarize the importance of ${topic} from a ${essayStyle} perspective`;
 
         return outline;
     },
 
-    generateThesis(topic, wikiContext) {
-        // Extract key concept from Wikipedia context if available
-        const keyInfo = wikiContext ? wikiContext.split('.')[0] : null;
-
-        const thesisTemplates = [
-            `${topic} represents a significant concept that merits careful examination`,
-            `Understanding ${topic} requires exploring its various dimensions and implications`,
-            `The study of ${topic} reveals important insights about our world`,
-            `${topic} plays a crucial role in shaping our understanding of related concepts`,
-            keyInfo ? `${keyInfo}, making it an important subject of study` : null
-        ].filter(t => t);
-
-        return thesisTemplates[Math.floor(Math.random() * thesisTemplates.length)];
+    generateThesis(topic, wikiContext, style) {
+        // Use the selected style to get templates
+        const templates = this.getStyleTemplates(style, topic);
+        const thesis = templates.theses[Math.floor(Math.random() * templates.theses.length)];
+        return thesis;
     },
 
-    generateBodyPoint(topic, wikiContext, index) {
-        const aspects = [
-            `the fundamental nature and characteristics of ${topic}`,
-            `the historical development and evolution of ${topic}`,
-            `the practical applications and real-world significance of ${topic}`,
-            `the challenges and controversies surrounding ${topic}`,
-            `the future implications and potential of ${topic}`
-        ];
+    generateBodyPoint(topic, wikiContext, index, style = 'analyst') {
+        // Returns specific argumentative points based on the Persona
+        // This ensures the CONTENT of the essay is different, not just the wording.
 
-        return aspects[index % aspects.length];
+        const points = {
+            historian: [
+                `the early origins and initial discovery of ${topic}`,
+                `how ${topic} has evolved and adapted over time`,
+                `the lasting legacy and historical impact of ${topic}`,
+                `key historical figures associated with ${topic}`,
+                `past controversies that shaped the modern view of ${topic}`
+            ],
+            futurist: [
+                `the rapid technological advancements currently shaping ${topic}`,
+                `the theoretical possibilities and future applications of ${topic}`,
+                `how ${topic} will redefine our society in the coming decades`,
+                `potential risks and challenges facing the future of ${topic}`,
+                `the long-term trajectory of ${topic}`
+            ],
+            analyst: [
+                `the underlying mechanisms that enable ${topic} to function`,
+                `the complex systemic relationships within ${topic}`,
+                `the measurable impact and efficiency of ${topic}`,
+                `key components and structural elements of ${topic}`,
+                `data-driven insights regarding ${topic}`
+            ],
+            storyteller: [
+                `the human story behind the creation of ${topic}`,
+                `the challenges and triumphs associated with ${topic}`,
+                `what the story of ${topic} teaches us about ourselves`,
+                `personal narratives that highlight the importance of ${topic}`,
+                `the emotional resonance of ${topic}`
+            ],
+            critic: [
+                `the central controversies and debates surrounding ${topic}`,
+                `the limitations and often-overlooked drawbacks of ${topic}`,
+                `alternative perspectives that challenge the consensus on ${topic}`,
+                `ethical considerations related to ${topic}`,
+                `a critical re-evaluation of the true value of ${topic}`
+            ],
+            persuasive: [
+                `the undeniable importance of accepting ${topic}`,
+                `why we must prioritize ${topic} immediately`,
+                `the clear benefits that ${topic} brings to society`,
+                `the consequences of ignoring the reality of ${topic}`,
+                `the moral imperative associated with ${topic}`
+            ],
+            descriptive: [
+                `the intricate visual details that define ${topic}`,
+                `the sensory experience of encountering ${topic}`,
+                `the aesthetic qualities inherent in ${topic}`,
+                `the atmosphere and mood surrounding ${topic}`,
+                `the vivid characteristics that make ${topic} unique`
+            ]
+        };
+
+        const stylePoints = points[style] || points['analyst'];
+        return stylePoints[index % stylePoints.length];
+    },
+
+    // ========== STYLE-BASED TEMPLATE SYSTEM ==========
+    getStyleTemplates(style, topic) {
+        // Returns unique template sets for different essay "personas"
+        // STYLES: 'historian', 'futurist', 'analyst', 'storyteller', 'critic'
+
+        const safeTopic = topic || "this subject";
+        const CapTopic = safeTopic.charAt(0).toUpperCase() + safeTopic.slice(1);
+
+        const templates = {
+            historian: {
+                hooks: [
+                    `To truly understand the present state of ${safeTopic}, we must first look to its past.`,
+                    `The history of ${safeTopic} is a tapestry of innovation and change.`,
+                    `For generations, the influence of ${safeTopic} has been pivotal in shaping our world.`,
+                    `Tracing the origins of ${safeTopic} reveals a fascinating journey.`,
+                    `The evolution of ${safeTopic} offers a window into human progress.`
+                ],
+                theses: [
+                    `Its historical context provides the key to unlocking its modern relevance`,
+                    `A retrospective analysis clarifies why ${safeTopic} remains so vital today`,
+                    `The legacy of ${safeTopic} continues to influence contemporary thought`,
+                    `By examining its development, we gain a deeper appreciation for its current form`
+                ],
+                bodyStarters: [
+                    `Historically, the concept of ${safeTopic} has been defined by %POINT%.`,
+                    `Looking back, we can see that %POINT% was a turning point.`,
+                    `Traces of %POINT% can be found throughout its development.`,
+                    `The tradition of %POINT% remains a core influence.`,
+                    `From the beginning, %POINT% has been a constant factor.`
+                ],
+                conclusions: [
+                    `Looking back at the trajectory of ${safeTopic}, the path forward becomes clear.`,
+                    `History shows us that ${safeTopic} is an enduring force.`,
+                    `The lessons of the past regarding ${safeTopic} remain relevant.`,
+                    `We stand on the shoulders of giants when we study ${safeTopic}.`
+                ]
+            },
+            futurist: {
+                hooks: [
+                    `As we look toward the horizon, the role of ${safeTopic} is expanding rapidly.`,
+                    `The future of ${safeTopic} promises to redefine our understanding of the world.`,
+                    `We are standing on the precipice of a new era for ${safeTopic}.`,
+                    `Tomorrow's world will likely be shaped by the potential of ${safeTopic}.`,
+                    `Innovation in the field of ${safeTopic} is accelerating at an unprecedented pace.`
+                ],
+                theses: [
+                    `${safeTopic} will likely become the cornerstone of future developments`,
+                    `The potential to transform our society via ${safeTopic} cannot be underestimated`,
+                    `The next generation will define ${safeTopic} in ways we can only imagine`,
+                    `Strategies adopted today regarding ${safeTopic} will determine tomorrow's outcomes`
+                ],
+                bodyStarters: [
+                    `The potential for %POINT% is particularly exciting.`,
+                    `We can anticipate that %POINT% will drive future growth.`,
+                    `Emerging trends suggest that %POINT% will be critical.`,
+                    `Innovation in %POINT% is paving the way for new possibilities.`,
+                    `The evolution of %POINT% points toward a dynamic future.`
+                ],
+                conclusions: [
+                    `The future of ${safeTopic} is bright and full of potential.`,
+                    `We are only just beginning to scratch the surface of what is possible within this field.`,
+                    `As we move forward, ${safeTopic} will undoubtedly lead the way.`,
+                    `The next chapter in the story of ${safeTopic} has yet to be written.`
+                ]
+            },
+            analyst: {
+                hooks: [
+                    `At its core, ${safeTopic} functions as a complex system of interacting parts.`,
+                    `The mechanism behind ${safeTopic} is simple in principle but profound in execution.`,
+                    `A systematic review of ${safeTopic} reveals a structured and logical framework.`,
+                    `Understanding ${safeTopic} requires a clinical examination of its components.`,
+                    `The efficiency and impact of ${safeTopic} can be measured and analyzed.`
+                ],
+                theses: [
+                    `${safeTopic} serves as a fundamental driver within this ecosystem`,
+                    `The structural integrity here depends on the balance of its core elements`,
+                    `A logical assessment confirms its critical position in the hierarchy`,
+                    `Efficiency and function are the defining characteristics of ${safeTopic}`
+                ],
+                bodyStarters: [
+                    `The mechanics of %POINT% are essential to the whole.`,
+                    `Functionally, %POINT% serves as a bridge.`,
+                    `A closer inspection of %POINT% reveals its utility.`,
+                    `The data supports the view that %POINT% is a primary driver.`,
+                    `Logically, %POINT% follows from the previous premises.`
+                ],
+                conclusions: [
+                    `The analysis confirms that ${safeTopic} represents a robust and essential system.`,
+                    `Logical deduction leads us to value ${safeTopic} highly.`,
+                    `The evidence is conclusive regarding the utility of ${safeTopic}.`,
+                    `Systematically, ${safeTopic} proves its worth.`
+                ]
+            },
+            storyteller: {
+                hooks: [
+                    `It all begins with a simple idea: ${safeTopic}.`,
+                    `The story of ${safeTopic} is one of passion, struggle, and triumph.`,
+                    `Imagine a world without ${safeTopic} – it is hard to conceive.`,
+                    `Behind the cold facts of ${safeTopic} lies a deeply human experience.`,
+                    `Every great journey starts somewhere, and for ${safeTopic}, it starts here.`
+                ],
+                theses: [
+                    `${safeTopic} is more than a concept; it is a narrative of human endeavor`,
+                    `It weaves together threads of experience to create a larger picture`,
+                    `The human element of ${safeTopic} is what gives it true meaning`,
+                    `It resonates because it speaks to our shared experiences`
+                ],
+                bodyStarters: [
+                    `Consider the story of %POINT%.`,
+                    `This brings us to the chapter on %POINT%.`,
+                    `Like any good story, the plot thickens with %POINT%.`,
+                    `The narrative arc of ${safeTopic} pivots around %POINT%.`,
+                    `We see the human impact most clearly in %POINT%.`
+                ],
+                conclusions: [
+                    `And so, the story of ${safeTopic} continues to unfold.`,
+                    `It is a narrative that we are all writing together.`,
+                    `This is not the end, but merely a new beginning for ${safeTopic}.`,
+                    `The tale of ${safeTopic} reminds us of our own potential.`
+                ]
+            },
+            critic: {
+                hooks: [
+                    `While many accept ${safeTopic} at face value, a deeper look is necessary.`,
+                    `The popular consensus on ${safeTopic} often misses the point.`,
+                    `We must challenge our assumptions about ${safeTopic}.`,
+                    `The debate surrounding ${safeTopic} is far from settled.`,
+                    `Critics and proponents alike agree that ${safeTopic} is controversial.`
+                ],
+                theses: [
+                    `We must re-evaluate our stance on ${safeTopic} in light of new evidence`,
+                    `The conventional wisdom regarding ${safeTopic} is ripe for disruption`,
+                    `A critical lens reveals flaws and opportunities in equal measure`,
+                    `Blind acceptance of ${safeTopic} ignores its nuanced reality`
+                ],
+                bodyStarters: [
+                    `One cannot ignore the issue of %POINT%.`,
+                    `The controversy surrounding %POINT% is telling.`,
+                    `Critics often point to %POINT% as a key factor.`,
+                    `We must carefully scrutinize %POINT%.`,
+                    `The argument for %POINT% is compelling, yet complex.`
+                ],
+                conclusions: [
+                    `Ultimately, the verdict on ${safeTopic} depends on one's perspective.`,
+                    `We must remain vigilant and critical in our approach to ${safeTopic}.`,
+                    `The debate is ongoing, but the stakes are clear.`,
+                    `Blind faith is no substitute for critical engagement with ${safeTopic}.`
+                ]
+            },
+            persuasive: {
+                hooks: [
+                    `It is time to face the truth about ${safeTopic}.`,
+                    `We can no longer afford to ignore the importance of ${safeTopic}.`,
+                    `Every evidence points to one conclusion regarding ${safeTopic}.`,
+                    `The case for ${safeTopic} is stronger now than ever before.`,
+                    `Why is ${safeTopic} the most critical issue of our time?`
+                ],
+                theses: [
+                    `Action must be taken to support ${safeTopic} for the greater good`,
+                    `The benefits of ${safeTopic} far outweigh any potential downsides`,
+                    `We have a moral obligation to engage with ${safeTopic} meaningfully`,
+                    `Only by embracing ${safeTopic} can we hope to progress`
+                ],
+                bodyStarters: [
+                    `Consider the undeniable fact that %POINT%.`,
+                    `It is crucial to recognize that %POINT%.`,
+                    `We must admit that %POINT% is a game-changer.`,
+                    `The evidence clearly shows that %POINT%.`,
+                    `Reason dictates that %POINT% must be prioritized.`
+                ],
+                conclusions: [
+                    `The choice is clear: we must support ${safeTopic}.`,
+                    `Let us move forward with a renewed commitment to ${safeTopic}.`,
+                    `The time for debate is over; the time for action on ${safeTopic} is now.`,
+                    `We cannot turn our backs on the reality of ${safeTopic}.`
+                ]
+            },
+            descriptive: {
+                hooks: [
+                    `Picture, if you will, the essence of ${safeTopic}.`,
+                    `To see ${safeTopic} is to witness a marvel of existence.`,
+                    `The very nature of ${safeTopic} evokes a sense of wonder.`,
+                    `Imagine standing in the presence of ${safeTopic}.`,
+                    `A vivid tapestry of details comes together in ${safeTopic}.`
+                ],
+                theses: [
+                    `${safeTopic} is defined by its rich texture and vibrant presence`,
+                    `It stands as a testament to the beauty of complexity`,
+                    `The visual and sensory impact of ${safeTopic} is profound`,
+                    `It captures the imagination through its sheer distinctiveness`
+                ],
+                bodyStarters: [
+                    `One is immediately struck by %POINT%.`,
+                    `Notice the way %POINT% captures the attention.`,
+                    `There is a certain beauty in %POINT%.`,
+                    `The details of %POINT% are particularly collecting.`,
+                    `Visually, %POINT% offers a striking contrast.`
+                ],
+                conclusions: [
+                    `In the end, ${safeTopic} leaves a lasting impression on the mind.`,
+                    `It is a vivid reminder of the richness of our world.`,
+                    `The image of ${safeTopic} lingers long after the moment has passed.`,
+                    `To experience ${safeTopic} is to truly see.`
+                ]
+            }
+        };
+
+        return templates[style] || templates['analyst'];
     },
 
     generateIntroduction(topic, wikiContext, outline) {
-        // Hook: Engaging opening sentence
-        const hooks = [
-            `In today's world, few topics are as intriguing as ${topic}.`,
-            `The concept of ${topic} has captured the attention of many.`,
-            `When we consider ${topic}, we encounter a fascinating subject.`,
-            `${topic} stands as a topic worthy of deeper exploration.`,
-            `Throughout history, ${topic} has played an important role.`
-        ];
+        // Use the style from the outline (passed down from generateAdvancedEssay)
+        const selectedStyle = outline._style || 'analyst';
+        const templates = this.getStyleTemplates(selectedStyle, topic);
 
-        const hook = hooks[Math.floor(Math.random() * hooks.length)];
+        this.onLog(`Essay Persona: ${selectedStyle.toUpperCase()}`, "info");
 
-        // Context: Background information (use Wikipedia if available)
-        let context = "";
-        if (wikiContext) {
-            const sentences = wikiContext.split('.').filter(s => s.trim().length > 20);
-            context = sentences.slice(0, 2).join('.') + '.';
-        } else {
-            context = `This subject encompasses various aspects that deserve careful consideration. Understanding its complexity requires examining multiple perspectives.`;
-        }
-
-        // Thesis
+        const hook = templates.hooks[Math.floor(Math.random() * templates.hooks.length)];
         const thesis = outline.thesis + ".";
 
-        return `${hook} ${context} ${thesis}`;
+        // Context
+        let context = "";
+        if (wikiContext) {
+            context = wikiContext.split('.').slice(0, 2).join('.') + '.';
+        } else {
+            // More natural context bridging
+            context = `The subject of ${topic} is one that invites deep exploration.`;
+        }
+
+        // Direct/Narrative strategies from previous step can still apply, but using persona templates
+        // We will stick to a Standard Persona Flow for stability with new templates
+
+        // Transition
+        const transitions = ["This leads us to consider", "We can see that", "It follows that", "The evidence suggests"];
+        const trans = transitions[Math.floor(Math.random() * transitions.length)];
+
+        return `${hook} ${context} ${trans} ${thesis.charAt(0).toLowerCase() + thesis.slice(1)}`;
     },
 
     generateBodyParagraphs(topic, wikiContext, outline) {
         const paragraphs = [];
+        // Extract style from outline or default
+        const styles = ['historian', 'futurist', 'analyst', 'storyteller', 'critic'];
+        const selectedStyle = outline._style || styles[Math.floor(Math.random() * styles.length)];
+        const templates = this.getStyleTemplates(selectedStyle, topic);
+
+
+        // Safety check for templates
+        if (!templates || !templates.bodyStarters) {
+            // Fallback to analyst if specific style is missing components
+            templates = this.getStyleTemplates('analyst', topic);
+        }
+
+        // Shuffle body starters to avoid repetition
+        // We create a copy of the array and shuffle it
+        const starters = templates.bodyStarters || [];
+        const shuffledStarters = [...starters].sort(() => Math.random() - 0.5);
 
         for (let i = 0; i < outline.bodyPoints.length; i++) {
             const point = outline.bodyPoints[i];
-            const paragraph = this.generateBodyParagraph(topic, wikiContext, point, i);
-            paragraphs.push(paragraph);
+
+            // Use shuffled starters via modulo to ensure uniqueness as long as possible
+            // Safety check for empty starters
+            let starter = "";
+            if (shuffledStarters.length > 0) {
+                const rawStarter = shuffledStarters[i % shuffledStarters.length];
+                starter = rawStarter.replace('%POINT%', point);
+            } else {
+                starter = `Regarding ${point},`;
+            }
+
+            // Support
+            let support = this.generateSupportingSentences(topic, point, i);
+            if (wikiContext) {
+                const sents = wikiContext.split('.');
+                if (sents.length > 5 + i) support = sents[5 + i] + ".";
+            }
+
+            paragraphs.push(`${starter} ${support}`);
         }
 
         return paragraphs.join('\n\n');
     },
 
-    generateBodyParagraph(topic, wikiContext, mainPoint, index) {
-        // Topic sentence - complete, natural sentences
-        const topicSentenceStarters = [
-            // Natural, conversational starters
-            `When we look at ${mainPoint}, several things stand out.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} deserves closer examination.`,
-            `Consider ${mainPoint} for a moment.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} is particularly interesting.`,
-            `We can't ignore ${mainPoint}.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} plays a key role here.`,
-            `Looking at ${mainPoint}, we find important insights.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} presents an intriguing case.`,
-            `There's something compelling about ${mainPoint}.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} offers valuable perspective.`,
-            // Direct, simple starters
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} matters greatly.`,
-            `Think about ${mainPoint}.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} reveals important truths.`,
-            `We should examine ${mainPoint} carefully.`,
-            `${mainPoint.charAt(0).toUpperCase() + mainPoint.slice(1)} shows us a lot.`
-        ];
-
-        const starter = topicSentenceStarters[Math.floor(Math.random() * topicSentenceStarters.length)];
-        const topicSentence = starter;
-
-        // Supporting sentences (use Wikipedia context if available)
-        let support = "";
-
-        // Clean context of headers like "**Topic:**" before processing
-        let cleanContext = wikiContext ? wikiContext.replace(/\*\*.*?\*\*[\s:]*/g, '') : "";
-
-        if (cleanContext) {
-            const sentences = cleanContext.split('.').filter(s => s.trim().length > 20);
-
-            // KEY FIX: Offset slicing to avoid reusing Intro content
-            // Intro checks first 3 sentences. Body paragraphs should start AFTER that.
-            // Formula: Start at 3 + (index * 2)
-            const startIdx = 3 + (index * 2);
-            const relevantSentences = sentences.slice(startIdx, startIdx + 2);
-
-            if (relevantSentences.length > 0) {
-                // Remove topic name repeats at very start of sentence to assist flow
-                support = relevantSentences.join('. ') + '.';
-            } else {
-                // Fallback if we run out of sentences
-                support = this.generateSupportingSentences(topic, mainPoint, index);
-            }
-        } else {
-            // Generate generic supporting content
-            support = this.generateSupportingSentences(topic, mainPoint, index);
-        }
-
-        // Concluding sentence for paragraph - more natural, less formulaic
-        const concluders = [
-            `This helps explain why ${topic} remains relevant today.`,
-            `These details matter more than they might first appear.`,
-            `It's clear this plays a significant role.`,
-            `This context changes how we view the bigger picture.`,
-            `Without understanding this, we'd miss something important.`,
-            `This adds another layer to what we already know.`,
-            `The implications here are worth considering.`,
-            `This shapes our overall understanding in meaningful ways.`,
-            `We can see how this fits into the larger story.`,
-            `This piece of the puzzle shouldn't be overlooked.`,
-            // Sometimes no concluder - just let the support stand
-            "",
-            "",
-            "" // Higher chance of no concluder for variety
-        ];
-
-        const concluder = concluders[Math.floor(Math.random() * concluders.length)];
-        const conclusion = concluder ? ` ${concluder}` : "";
-
-        return `${topicSentence} ${support}${conclusion}`;
-    },
-
     generateSupportingSentences(topic, mainPoint, index) {
-        // Generate 2-3 supporting sentences
-        // Expanded template pool to 15 unique variants to avoid duplication (User Request)
-        const templates = [
-            `This aspect of ${topic} has been studied extensively. Researchers have found compelling evidence supporting various perspectives. The implications extend beyond immediate observations.`,
-            `Examining this dimension reveals important patterns. Multiple factors contribute to the overall picture. Each element plays a distinct role in the larger framework.`,
-            `Historical analysis shows how this has evolved over time. Contemporary understanding builds upon earlier foundations. Modern perspectives incorporate both traditional and innovative approaches.`,
-            `Experts often point to this as a critical factor. The underlying mechanisms are complex but essential to understand. This helps validify the broader consensus on the subject.`,
-            `When analyzed closely, the datal supports this view. There is a rich interplay between these factors. It becomes clear that simple explanations often miss the mark.`,
-            `This has significant downstream effects. The influence it has on the surrounding context is undeniable. We can see clear cause-and-effect relationships at play here.`,
-            `Critics and proponents alike debate the specifics. However, the core importance remains unchallenged. This ongoing dialogue shapes how we currently perceive ${topic}.`,
-            `Data from various sources corroborates this. The consistent presence of this theme suggests it is foundational. Ignoring it would lead to an incomplete understanding.`,
-            `This contributes deeply to the overall narrative. It serves as a bridge between different concepts. Without it, the structure would lack coherence.`,
-            `This is more than just a minor detail. It represents a shift in how we approach the subject. The long-term consequences are still being evaluated.`,
-            `Evidence suggests a strong correlation here. This aligns with broader trends we observe elsewhere. It fits neatly into the established theoretical models.`,
-            `This component acts as a catalyst for other changes. Its impact resonates through the entire system. We can trace many outcomes back to this single point.`,
-            `Scholars have long emphasized this particular point. It remains a focal point of academic discussion. The depth of analysis here continues to grow.`,
-            `This illustrates the dynamic nature of ${topic}. Nothing exists in a vacuum, and this is no exception. It interacts fluidly with other key elements.`,
-            `Taking a step back, this helps frame the entire issue. It provides the necessary context for deeper discussion. This perspective is essential for a holistic view.`
+        // Generates a robust, multi-sentence paragraph structure
+        // Flow: Elaboration -> hypothetical/General Example -> Nuance/Counterpoint -> Connection
+
+        const elaborations = [
+            `This aspect is crucial because it fundamentally alters our understanding of the subject.`,
+            `To fully appreciate this, one must consider the broader implications involved.`,
+            `The mechanics behind this specific point are complex and multifaceted.`,
+            `At a deeper level, this speaks to the core identity of ${topic}.`,
+            `This is not merely a detail; it is a structural pillar of the entire concept.`
         ];
 
-        // Use deterministic selection based on paragraph index to GUARANTEE uniqueness within an essay
-        const safeIndex = (index || 0) % templates.length;
+        const examples = [
+            `For instance, consider how similar phenomena operate in related fields.`,
+            `We can observe this dynamic in action when we look at historical precedents.`,
+            `A clear example can be found when analyzing the data from recent studies.`,
+            `This is often illustrated by the way experts approach the problem in practice.`,
+            `In many ways, this mirrors the behavior we see in complex systems elsewhere.`
+        ];
 
-        return templates[safeIndex];
+        const nuances = [
+            `However, it is important to note that this is not a universal rule.`,
+            `Moreover, the impact here can vary significantly depending on the context.`,
+            `Conversely, some argue that this influence is often overstated.`,
+            `Furthermore, the relationship between these factors is not always linear.`,
+            `Additionally, new evidence suggests that this view may be evolving.`
+        ];
+
+        const connections = [
+            `Ultimately, this reinforces the central thesis regarding ${topic}.`,
+            `This connection serves to highlight the unique position of ${topic}.`,
+            `Therefore, we cannot ignore this element when discussing ${topic}.`,
+            `As such, this remains a key area for further investigation.`,
+            `This insight bridges the gap between theory and practice in the study of ${topic}.`
+        ];
+
+        // Select varied sentences based on index to prevent repetition in a single essay
+        const e = elaborations[(index) % elaborations.length];
+        const x = examples[(index + 1) % examples.length];
+        const n = nuances[(index + 2) % nuances.length];
+        const c = connections[(index + 3) % connections.length];
+
+        return `${e} ${x} ${n} ${c}`;
     },
 
     generateConclusion(topic, outline, wikiContext) {
         // Complete, natural conclusions
         const openings = [
+            // Standard
             `${topic} is clearly an important topic.`,
             `After examining ${topic}, it's evident that this subject deserves attention.`,
             `${topic} continues to be relevant in today's world.`,
             `Looking at ${topic} this way helps us understand it better.`,
+
+            // Reflective
             `What stands out about ${topic} is its lasting significance.`,
             `${topic} matters for many reasons.`,
-            `Understanding ${topic} better helps us make sense of related issues.`
+            `Understanding ${topic} better helps us make sense of related issues.`,
+
+            // Definitive
+            `There is no denying the impact of ${topic}.`,
+            `The evidence places ${topic} at the center of this discusson.`,
+            `In summary, ${topic} is a cornerstone of this field.`,
+
+            // Broader Context
+            `Beyond the immediate details, ${topic} speaks to larger themes.`,
+            `Ultimately, ${topic} reflects broader trends in our society.`,
+            `We cannot isolate ${topic} from its context.`
         ];
 
         const opening = openings[Math.floor(Math.random() * openings.length)];
@@ -4220,7 +4683,13 @@ const GuahhEngine = {
             `this subject keeps revealing new layers the more we examine it`,
             `the complexity here shouldn't be underestimated`,
             `we can appreciate both its historical importance and modern relevance`,
-            `this continues to shape how we think about related topics`
+            `this continues to shape how we think about related topics`,
+            // NEW SUMMARIES
+            `the data and history combine to tell a compelling story`,
+            `from every perspective, the importance is clear`,
+            `it serves as a powerful example of complexity in action`,
+            `no single perspective captures the whole truth`,
+            `the interplay of these factors creates a unique dynamic`
         ];
 
         const summary = summaries[Math.floor(Math.random() * summaries.length)];
@@ -4237,7 +4706,14 @@ const GuahhEngine = {
             `New research continues to shed light on different aspects.`,
             `Our understanding keeps evolving as we learn more.`,
             `This subject has proven its staying power.`,
+            // NEW ENDINGS
+            `It remains to be seen how this will evolve next.`,
+            `The lasting legacy of ${topic} is secure.`,
+            `We would do well to keep this in mind.`,
+            `That is the enduring power of ${topic}.`,
+            `And that is why ${topic} matters.`,
             // Sometimes end without a forward-looking statement
+            "",
             "",
             ""
         ];
@@ -4304,9 +4780,11 @@ const GuahhEngine = {
             const words = sentence.split(' ');
 
             // If sentence is very short and next exists, occasionally combine
-            if (words.length < 6 && i < sentences.length - 1 && Math.random() > 0.7) {
+            if (words.length < 8 && i < sentences.length - 1 && Math.random() > 0.6) {
                 const next = sentences[i + 1];
-                varied.push(`${sentence}, and ${next.charAt(0).toLowerCase()}${next.slice(1)}`);
+                const conjunctions = ["and", "while", "yet", "although", "but"];
+                const conj = conjunctions[Math.floor(Math.random() * conjunctions.length)];
+                varied.push(`${sentence}, ${conj} ${next.charAt(0).toLowerCase()}${next.slice(1)}`);
                 i++; // Skip next since we combined
             } else {
                 varied.push(sentence);
@@ -5034,137 +5512,9 @@ const GuahhEngine = {
         return templates[Math.floor(Math.random() * templates.length)];
     },
 
-    // ========== ADVANCED ESSAY ENGINE ==========
-
-    generateAdvancedEssay(topic, context) {
-        this.onLog(`Generating High-Density Essay on: ${topic}`, "process");
-
-        const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-        const title = `The Significance of ${capitalize(topic)}`;
-
-        // 1. Process Context into Data Points
-        let cleanContext = context ? context.replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim() : "";
-        let sentences = cleanContext.match(/[^.!?]+[.!?]+/g) || [];
-        sentences = sentences.map(s => s.trim()).filter(s => s.length > 20);
-
-        this.onLog(`Extracted ${sentences.length} fact sentences for essay.`, "data");
-
-        // 2. Define Dynamic Sections based on Topic
-        let sections = [
-            { id: 'intro', title: 'Introduction', count: 2 },
-            { id: 'history', title: 'Historical Context', keywords: /history|origin|began|ancient|early/i, count: 3 },
-        ];
-
-        // Conditional Sections
-        if (/technology|ai|computer|future|digital/i.test(topic)) {
-            sections.push({ id: 'ethics', title: 'Ethical Considerations', keywords: /ethic|moral|privacy|data|risk/i, count: 3 });
-            sections.push({ id: 'future', title: 'Future Outlook', keywords: /future|will|predict|trend/i, count: 3 });
-        } else if (/war|battle|politics|government/i.test(topic)) {
-            sections.push({ id: 'impact', title: 'Societal Impact', keywords: /society|people|population|effect|consequence/i, count: 3 });
-            sections.push({ id: 'conflict', title: 'Key Conflicts', keywords: /fight|war|dispute|tension/i, count: 3 });
-        } else if (/nature|environment|animal|plant/i.test(topic)) {
-            sections.push({ id: 'environment', title: 'Environmental Role', keywords: /ecosystem|role|function|habitat/i, count: 3 });
-            sections.push({ id: 'conservation', title: 'Conservation Efforts', keywords: /protect|save|endanger|conserve/i, count: 3 });
-        } else {
-            // General Fallbacks
-            sections.push({ id: 'significance', title: 'Significance', keywords: /important|significant|impact|role/i, count: 3 });
-            sections.push({ id: 'application', title: 'Modern Applications', keywords: /use|apply|modern|today/i, count: 3 });
-            sections.push({ id: 'challenges', title: 'Challenges and Criticisms', keywords: /problem|issue|critic|challenge/i, count: 3 });
-        }
-
-        // Always have conclusion
-        sections.push({ id: 'conclusion', title: 'Conclusion', count: 2 });
-
-        // 3. Distribute Facts to Sections
-        const facts = {};
-        const usedSentences = new Set();
-
-        sections.forEach(sec => {
-            facts[sec.id] = [];
-            if (sec.keywords) {
-                sentences.forEach(s => {
-                    if (!usedSentences.has(s) && sec.keywords.test(s)) {
-                        facts[sec.id].push(s);
-                        usedSentences.add(s);
-                    }
-                });
-            }
-        });
-
-        // Fill remaining buckets round-robin
-        let secIndex = 0;
-        sentences.forEach(s => {
-            if (!usedSentences.has(s)) {
-                // Skip intro/conclusion for random filling usually, unless empty
-                let targetSec = sections[secIndex % (sections.length - 2) + 1]; // Skip first (intro) and last (conclusion) usually
-                facts[targetSec.id].push(s);
-                secIndex++;
-            }
-        });
-
-        // 4. Generate Content
-        let essayParts = [`## ${title}\n`];
-
-        sections.forEach((sec, idx) => {
-            const sectionFacts = facts[sec.id] || [];
-
-            // Special handling for Intro
-            if (sec.id === 'intro') {
-                const hook = `The concept of **${topic}** has long been a subject of significant interest and debate.`;
-                const thesis = `This essay explores its history, key characteristics, and broader impact on the world today.`;
-                const introBody = sectionFacts.length > 0 ? sectionFacts.join(" ") : `Defined by its unique properties, ${topic} stands as a cornerstone in its field.`;
-                essayParts.push(`${hook} ${introBody} ${thesis}`);
-                return;
-            }
-
-            // Special handling for Conclusion
-            if (sec.id === 'conclusion') {
-                const summary = `In conclusion, ${topic} remains a dynamic and vital subject.`;
-                const finalThought = `As we look to the future, its influence is likely to only grow stronger, warranting continued study and attention.`;
-                essayParts.push(`${summary} From the historical foundations to modern complexities, the journey of ${topic} is one of constant evolution. ${finalThought}`);
-                return;
-            }
-
-            // Body Paragraphs
-            const para = this.buildElaboratedParagraph(topic, sec.title, sectionFacts);
-            essayParts.push(para);
-        });
-
-        return essayParts.join('\n\n');
-    },
-
-    buildElaboratedParagraph(topic, sectionTitle, facts) {
-        // Start with a strong topic sentence
-        let para = `### ${sectionTitle}\n\n`; // Add subheaders for structure? Or just text. Let's do text for flow, maybe bold start.
-        // Actually user wanted structure, so subheaders or just clear topic sentences.
-        // Let's stick to standard paragraph flow but ensure length.
-
-        para = ""; // Reset, standard essay format usually doesn't have subheaders every para
-        const transition = this.getRandomTransition();
-        const start = `${transition} regarding the **${sectionTitle.toLowerCase()}** of ${topic}, there are several key points to consider.`;
-
-        let body = "";
-        if (facts.length >= 3) {
-            body = facts.join(" ");
-        } else if (facts.length > 0) {
-            // Elaboration needed
-            body = facts[0];
-            body += ` This particular aspect highlights the underlying complexity of ${topic}.`;
-            if (facts[1]) body += ` Additionally, ${facts[1]}`;
-            body += ` It is worth noting that such details often play a crucial role in the broader context.`;
-        } else {
-            // Full hallucination/logic fill needed
-            body = `When examining the ${sectionTitle.toLowerCase()}, one finds a rich tapestry of influencing factors. Evidence suggests that this area is critical to a holistic understanding of ${topic}. Experts often cite this as a primary driver of change/`;
-            body += ` The implications here extend far beyond the immediate observations, suggesting a deep interconnectedness with other fields.`;
-        }
-
-        return `${start} ${body}`;
-    },
-
-    getRandomTransition() {
-        const t = ["Furthermore,", "Moreover,", "In addition,", "Conversely,", "Turning our attention to,", "Another significant aspect is,"];
-        return t[Math.floor(Math.random() * t.length)];
-    },
+    // [REMOVED DUPLICATE LEGACY ESSAY FUNCTION]
+    // The active generateAdvancedEssay is now located at lines ~4059.
+    // This block previously contained the "Significance of" templates which have been deprecated.
 
     generateCreativeText(topic, query) {
         // Simple fallback for non-essay creative requests (stories, etc.)

@@ -91,6 +91,17 @@ function saveSession(session) {
         triggerCloudSync(session);
     } catch (e) {
         console.error('Error saving session:', e);
+        if (e.name === 'QuotaExceededError') {
+            // Handle storage full
+            console.warn("LocalStorage full, deleting old sessions...");
+            try {
+                let sessions = getAllSessions();
+                sessions = sessions.slice(0, 20); // Keep only 20
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+            } catch (e2) {
+                console.error("Failed to recover storage space.", e2);
+            }
+        }
     }
 }
 
@@ -148,6 +159,7 @@ function loadSession(sessionId) {
 }
 
 function createNewChat() {
+    console.log("Creating new chat...");
     // Save current session if it has messages
     if (currentSession && currentSession.messages.length > 0) {
         saveSession(currentSession);
@@ -155,10 +167,15 @@ function createNewChat() {
 
     // Create new session
     currentSession = new ChatSession();
+    console.log("New session created:", currentSession.id);
 
     // Clear chat area
     if (activeChat) {
         activeChat.innerHTML = '';
+    } else {
+        console.warn("activeChat element not found during createNewChat");
+        activeChat = document.getElementById('chatArea') || document.getElementById('chat-viewport');
+        if (activeChat) activeChat.innerHTML = '';
     }
 
     // Clear input
