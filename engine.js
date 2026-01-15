@@ -89,6 +89,7 @@ const GuahhEngine = {
     recentOutputs: [],
     conversationHistory: [],
     wikiCache: new Map(),
+    conceptGraph: [], // Tracks recently mentioned entities for context resolution
 
     // Feedback Learning System
     feedbackMemory: {
@@ -927,9 +928,19 @@ const GuahhEngine = {
             lastAIQuestion: history.length > 0 && history[history.length - 1].response.trim().endsWith('?')
                 ? history[history.length - 1].response
                 : null,
-            hasPronouns: /\b(it|that|this|they|them|these|those)\b/i.test(query),
+            hasPronouns: /\b(it|that|this|they|them|he|him|she|her|these|those)\b/i.test(query),
             isFollowUp: this.isContextualFollowUp(query)
         };
+
+        // Update Concept Graph with entities from recent history if needed
+        // (Ideally this happens after response generation, but we do a pass here for the CURRENT query context)
+        if (history.length > 0) {
+            const lastResponse = history[history.length - 1].response;
+            this.updateConceptGraph(lastResponse, 'system');
+        }
+
+        // Also extract from current query to add to graph for FUTURE turns
+        this.updateConceptGraph(query, 'user');
 
         // Detect pending actions from the last question
         if (context.lastAIQuestion) {
@@ -941,7 +952,7 @@ const GuahhEngine = {
         }
 
         // If query has pronouns, resolve them
-        if (context.hasPronouns && context.lastTopic) {
+        if (context.hasPronouns) {
             context.resolvedQuery = this.resolvePronouns(query, context);
         } else {
             context.resolvedQuery = query;
@@ -950,40 +961,101 @@ const GuahhEngine = {
         return context;
     },
 
+    updateConceptGraph(text, source) {
+        if (!text) return;
+        const entities = this.extractEntities(text);
+
+        // Add found entities to graph
+        // We prioritize proper nouns (keywords) and concepts
+        const allEntities = [...entities.keywords, ...entities.concepts];
+
+        allEntities.forEach(entity => {
+            // Remove duplicates (move to end)
+            const idx = this.conceptGraph.findIndex(e => e.text.toLowerCase() === entity.toLowerCase());
+            if (idx >= 0) {
+                this.conceptGraph.splice(idx, 1);
+            }
+
+            // Infer basic type (person/thing) - naive heuristic
+            // If it's in our "properNouns" list (from capitalizeProperNouns) or has "Mr/Mrs", assume person
+            // For now, default to 'thing' unless we have clue
+            let type = 'thing';
+            if (/(he|she|who)/i.test(text) && text.includes(entity)) type = 'person'; // Very weak heuristic
+
+            this.conceptGraph.push({
+                text: entity,
+                source: source,
+                type: type,
+                timestamp: Date.now()
+            });
+        });
+
+        // Limit graph size
+        if (this.conceptGraph.length > 20) {
+            this.conceptGraph = this.conceptGraph.slice(-20);
+        }
+    },
+
     resolvePronouns(query, context) {
         let resolved = query;
 
-        // If no topic, maybe check if we can infer one from recent history
-        let topic = context.lastTopic;
-        if (!topic && context.recentQueries.length > 0) {
-            // Try to find a topic in the last user query
-            // This is a simple heuristic fallback
-            const lastUserQuery = context.recentQueries[context.recentQueries.length - 1];
-            topic = this.extractTopic(lastUserQuery);
-        }
-
-        if (!topic) return query;
-
         // "Tell me more" pattern - implicit reference
         if (/^(tell me more|go on|continue|expand|details|elaborate)$/i.test(query.trim())) {
-            return `${query} about ${topic}`;
+            // Find most recent significant topic
+            const topic = context.lastTopic || (this.conceptGraph.length > 0 ? this.conceptGraph[this.conceptGraph.length - 1].text : null);
+            if (topic) return `${query} about ${topic}`;
         }
 
-        // "Why?" pattern - implicit reference
+        // "Why?" pattern
         if (/^why\??$/i.test(query.trim())) {
-            return `why is ${topic} like that?`;
+            const topic = context.lastTopic || (this.conceptGraph.length > 0 ? this.conceptGraph[this.conceptGraph.length - 1].text : null);
+            if (topic) return `why is ${topic} like that?`;
         }
 
-        // Replace common pronouns with the last topic
-        // We use a more careful boundary check
-        resolved = resolved.replace(/\b(it|that|this|the first one)\b/gi, (match) => {
-            // detailed logic could go here, for now swapping it in
-            return topic;
+        // Pronoun Mapping Strategy
+        // We look backwards in the concept graph for the First matching entity
+        const pronouns = [
+            { patterns: /\b(he|him|his)\b/gi, type: 'person' },
+            { patterns: /\b(she|her|hers)\b/gi, type: 'person' },
+            { patterns: /\b(it|that|this)\b/gi, type: 'thing' }, // 'it' matches almost anything recent
+            { patterns: /\b(they|them|these|those)\b/gi, type: 'plural' } // Plural logic hard, fallback to recent
+        ];
+
+        let hasReplacement = false;
+
+        pronouns.forEach(pDef => {
+            resolved = resolved.replace(pDef.patterns, (match) => {
+                // Find substitute
+                // Iterate backwards through graph
+                for (let i = this.conceptGraph.length - 1; i >= 0; i--) {
+                    const entity = this.conceptGraph[i];
+                    // Skip entities from THIS query (we want previous context)
+                    if (entity.source === 'user' && Date.now() - entity.timestamp < 100) continue;
+
+                    // Allow replacement.
+                    // Ideally we match gender/type, but our type detection is weak.
+                    // So we prioritize recency.
+
+                    hasReplacement = true;
+                    return entity.text;
+                }
+
+                // Fallback to lastTopic if graph fails
+                if (context.lastTopic) return context.lastTopic;
+
+                return match;
+            });
         });
+
+        if (!hasReplacement && context.lastTopic) {
+            // Fallback for generic "it" if regex didn't catch specific graph match or graph was empty
+            resolved = resolved.replace(/\b(it|that|this)\b/gi, context.lastTopic);
+        }
 
         // "and?" pattern
         if (/^and\??$/i.test(query.trim())) {
-            return `what else about ${topic}?`;
+            const topic = context.lastTopic || (this.conceptGraph.length > 0 ? this.conceptGraph[this.conceptGraph.length - 1].text : null);
+            if (topic) return `what else about ${topic}?`;
         }
 
         return resolved;
@@ -1403,7 +1475,13 @@ const GuahhEngine = {
             return null;
         }
 
-        // Combine results with headers
+        // If it's a direct comparison (2 items), generate a smart synthesis
+        if (results.length === 2) {
+            const synthesis = this.generateComparisonSynthesis(results[0], results[1]);
+            return synthesis;
+        }
+
+        // Combine results with headers (standard behavior for > 2 or 1)
         let combined = "";
         if (results.length > 1) {
             results.forEach((r, idx) => {
@@ -1417,6 +1495,40 @@ const GuahhEngine = {
 
         this.onLog(`✓ Combined ${results.length} results`, "success");
         return combined;
+    },
+
+    generateComparisonSynthesis(itemA, itemB) {
+        // Create a structured comparison
+        let report = `### Comparison: ${itemA.query} vs ${itemB.query}\n\n`;
+
+        // 1. Brief Summaries
+        const sumA = this.summarizeText(itemA.content);
+        const sumB = this.summarizeText(itemB.content);
+
+        report += `**${itemA.query}**\n${sumA}\n\n`;
+        report += `**${itemB.query}**\n${sumB}\n\n`;
+
+        // 2. Key Differences Analysis (Naive heuristic based on keyword flags)
+        // We look for dates, numbers, or key defining words
+        report += `**Analysis**\n`;
+
+        // Extract years to compare timelines
+        const yearsA = itemA.content.match(/\b(18|19|20)\d{2}\b/g) || [];
+        const yearsB = itemB.content.match(/\b(18|19|20)\d{2}\b/g) || [];
+
+        if (yearsA.length > 0 && yearsB.length > 0) {
+            const minA = Math.min(...yearsA);
+            const minB = Math.min(...yearsB);
+            if (Math.abs(minA - minB) > 10) {
+                report += `* **Timeline:** ${itemA.query} (c. ${minA}) appears to be disjoint from ${itemB.query} (c. ${minB}).\n`;
+            } else {
+                report += `* **Timeline:** Both seem to be active around the same era (${minA}s).\n`;
+            }
+        }
+
+        report += `* These two subjects are distinct but often compared. Review specific details above for nuanced differences.`;
+
+        return report;
     },
 
     // ========== ADVANCED TOPIC & SEARCH UNDERSTANDING ==========
@@ -1688,6 +1800,16 @@ const GuahhEngine = {
             case 'funny':
                 paraphrased = this.applyWittyTone(text);
                 break;
+            case 'structural':
+            case 'rewrite':
+                paraphrased = this.applyStructuralRewrite(text);
+                break;
+            case 'persuasive':
+                paraphrased = this.applyPersuasiveTone(text);
+                break;
+            case 'empathetic':
+                paraphrased = this.applyEmpatheticTone(text);
+                break;
             default:
                 // Neutral - intelligent synonym replacement
                 paraphrased = this.featureRichSynonymReplacement(text, 'neutral');
@@ -1926,6 +2048,83 @@ const GuahhEngine = {
         });
     },
 
+    applyStructuralRewrite(text) {
+        // Advanced: Splits long sentences and joins short ones
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        let rewritten = [];
+
+        for (let i = 0; i < sentences.length; i++) {
+            let s = sentences[i].trim();
+            const words = s.split(' ');
+
+            // 1. Split very long sentences (>25 words)
+            if (words.length > 25 && s.includes(',')) {
+                // Naive split at first major comma
+                const splitPt = s.indexOf(',', 30); // Find comma after first 30 chars
+                if (splitPt !== -1) {
+                    const p1 = s.substring(0, splitPt).trim();
+                    const p2 = s.substring(splitPt + 1).trim();
+                    // Capitalize second part
+                    const p2Cap = p2.charAt(0).toUpperCase() + p2.slice(1);
+                    rewritten.push(`${p1}.`);
+                    rewritten.push(`${p2Cap}`);
+                    continue; // Skip standard push
+                }
+            }
+
+            // 2. Combine very short sentences (<6 words)
+            if (words.length < 6 && i < sentences.length - 1) {
+                const next = sentences[i + 1].trim();
+                if (next.length < 15) {
+                    const combined = `${s.replace(/[.!?]+$/, '')} and ${next.charAt(0).toLowerCase() + next.slice(1)}`;
+                    rewritten.push(combined);
+                    i++; // Skip next
+                    continue;
+                }
+            }
+
+            rewritten.push(s);
+        }
+
+        return rewritten.join(' ');
+    },
+
+    applyPersuasiveTone(text) {
+        const openers = ["Undoubtedly,", "Clearly,", "Experts agree that", "It is undeniable that"];
+        let t = text;
+
+        // Add strong openers to some sentences
+        const sentences = t.match(/[^.!?]+[.!?]+/g) || [t];
+        t = sentences.map(s => {
+            if (s.length > 20 && Math.random() > 0.6) {
+                return `${openers[Math.floor(Math.random() * openers.length)]} ${s.charAt(0).toLowerCase() + s.slice(1)}`;
+            }
+            return s;
+        }).join(' ');
+
+        // Use strong vocabulary
+        const vocab = {
+            "think": "firmly believe", "good": "compelling", "bad": "unacceptable",
+            "should": "must", "important": "critical", "idea": "vision"
+        };
+        return this.replaceVocab(t, vocab);
+    },
+
+    applyEmpatheticTone(text) {
+        const vocab = {
+            "understand": "appreciate", "problem": "challenge", "hard": "challenging",
+            "sorry": "apologies", "no": "unfortunately not"
+        };
+        let t = this.replaceVocab(text, vocab);
+
+        // Soften statements
+        if (!t.startsWith("I understand how")) {
+            const softeners = ["I understand how you feel.", "That sounds difficult.", "I'm here to help."];
+            t = `${softeners[Math.floor(Math.random() * softeners.length)]} ${t}`;
+        }
+        return t;
+    },
+
     // ========== END ADVANCED PARAPHRASING SYSTEM ==========
 
     // ========== END PARAPHRASING SYSTEM ==========
@@ -2035,15 +2234,13 @@ const GuahhEngine = {
             'classic tailored', 'streetwear casual', 'elegant sophisticated', 'eclectic mixed-pattern'];
         const occasions = ['work meetings', 'casual weekends', 'date nights', 'outdoor adventures',
             'formal events', 'creative gatherings', 'everyday comfort', 'special celebrations'];
-        const features = ['comfortable and practical', 'statement-making bold', 'seasonally appropriate',
-            'versatile mix-and-match', 'trend-forward unique', 'timeless classic'];
 
         const templates = [
-            `${styles[index % styles.length]} look perfect for ${occasions[index % occasions.length]}`,
-            `${features[index % features.length]} ensemble with ${styles[(index + 2) % styles.length]} vibes`,
-            `Layer textures and colors for a ${styles[(index + 1) % styles.length]} aesthetic`,
-            `${occasions[(index + 3) % occasions.length]} outfit featuring ${features[(index + 1) % features.length]} pieces`,
-            `Experiment with a ${styles[(index + 3) % styles.length]} style mixing unexpected elements`,
+            `A **${styles[index % styles.length]}** style applied to **${topic}**, making it perfect for ${occasions[index % occasions.length]}.`,
+            `Combine **${topic}** with **${styles[(index + 2) % styles.length]}** elements for a unique look.`,
+            `Elevate **${topic}** by adding textures and colors for a **${styles[(index + 1) % styles.length]}** aesthetic.`,
+            `A **${occasions[(index + 3) % occasions.length]}** outfit centered around **${topic}** in a ${styles[(index + 3) % styles.length]} way.`,
+            `Experiment with **${topic}** by mixing it into a **${styles[(index + 3) % styles.length]}** ensemble.`
         ];
 
         return templates[index % templates.length];
@@ -2054,11 +2251,11 @@ const GuahhEngine = {
         const styles = ['quick weeknight', 'gourmet weekend', 'healthy balanced', 'indulgent treat', 'meal-prep friendly'];
 
         const templates = [
-            `How about a ${styles[index % styles.length]} ${cuisines[index % cuisines.length]} dish?`,
-            `Try a ${cuisines[(index + 1) % cuisines.length]} meal with ${styles[(index + 2) % styles.length]} elements.`,
-            `A ${styles[(index + 3) % styles.length]} option featuring ${cuisines[(index + 2) % cuisines.length]} flavors.`,
-            `Consider a ${cuisines[(index + 3) % cuisines.length]} inspired banquet.`,
-            `Why not make something ${styles[(index + 1) % styles.length]} using ${cuisines[index % cuisines.length]} techniques?`
+            `Prepare **${topic}** with a **${cuisines[index % cuisines.length]}** twist for a ${styles[index % styles.length]} meal.`,
+            `Reimagine **${topic}** using **${cuisines[(index + 1) % cuisines.length]}** flavors and ingredients.`,
+            `Create a **${styles[(index + 3) % styles.length]}** version of **${topic}** inspired by ${cuisines[(index + 2) % cuisines.length]} techniques.`,
+            `A **${cuisines[(index + 3) % cuisines.length]}** interpretation of **${topic}**, perfect for sharing.`,
+            `Elevate standard **${topic}** into something **${styles[(index + 1) % styles.length]}** with fresh herbs and spices.`
         ];
 
         return templates[index % templates.length];
@@ -2070,9 +2267,9 @@ const GuahhEngine = {
         const benefits = ['stress relief', 'personal growth', 'physical wellness', 'social connection', 'creativity', 'mindfulness'];
 
         const templates = [
-            `${approaches[index % approaches.length]} approach focusing on ${benefits[index % benefits.length]}`,
-            `Try ${topic} as a ${approaches[(index + 2) % approaches.length]} experience`,
-            `Combine ${topic} with ${benefits[(index + 1) % benefits.length]} for holistic wellness`,
+            `A **${approaches[index % approaches.length]}** approach to **${topic}**, focusing on ${benefits[index % benefits.length]}.`,
+            `Try **${topic}** as a ${approaches[(index + 2) % approaches.length]} experience to boost ${benefits[(index + 3) % benefits.length]}.`,
+            `Combine **${topic}** with **${benefits[(index + 1) % benefits.length]}** for holistic wellness.`,
         ];
 
         return templates[index % templates.length];
@@ -2150,10 +2347,10 @@ const GuahhEngine = {
         const activities = ['local cuisine tasting', 'hiking hidden trails', 'historical sightseeing', 'meeting locals', 'photography tour', 'relaxation'];
 
         const templates = [
-            `Plan a ${types[index % types.length]} focused on ${activities[index % activities.length]}`,
-            `Explore ${topic} through a ${types[(index + 1) % types.length]} lens`,
-            `Combine ${activities[(index + 2) % activities.length]} with a ${types[(index + 2) % types.length]} in ${topic}`,
-            `Discover the hidden gems of ${topic} on a ${types[(index + 3) % types.length]}`
+            `Plan a **${types[index % types.length]}** focused on **${topic}**, including ${activities[index % activities.length]}.`,
+            `Explore **${topic}** through a unique **${types[(index + 1) % types.length]}** lens.`,
+            `Combine **${activities[(index + 2) % activities.length]}** with your **${topic}** adventure.`,
+            `Discover the hidden gems of **${topic}** on a **${types[(index + 3) % types.length]}**.`
         ];
 
         return templates[index % templates.length];
@@ -2216,34 +2413,7 @@ const GuahhEngine = {
         return `**Fusion Concept**: A unique ${o} that uses **${d}** principles to **${a}** the experience of ${topic}.`;
     },
 
-    generateBrainstormIdeas(topic) {
-        // Detect topic type
-        const t = topic.toLowerCase();
-        let type = 'general';
 
-        if (/fashion|clothes|wear|outfit|style|dress|shirt|shoes/i.test(t)) type = 'fashion';
-        else if (/food|cook|recipe|dinner|lunch|meal|eat|diet/i.test(t)) type = 'food';
-        else if (/hobby|activity|fun|weekend|time|learn/i.test(t)) type = 'activity';
-        else if (/business|startup|company|market|sell|money/i.test(t)) type = 'business';
-        else if (/app|software|tech|code|program|web|site/i.test(t)) type = 'tech';
-        else if (/story|plot|character|write|novel|book/i.test(t)) type = 'creative';
-        else if (/product|invent|device|gadget/i.test(t)) type = 'product';
-        else if (/course|teach|class|study|education/i.test(t)) type = 'learning';
-        else if (/travel|trip|vacation|holiday/i.test(t)) type = 'travel';
-
-        // Generate 4 distinct ideas
-        let ideas = [];
-        for (let i = 0; i < 4; i++) {
-            // Mix specific type ideas with one "custom" creative idea
-            if (i === 3) {
-                ideas.push(`* ${this.generateCustomBrainstormIdea(topic)}`);
-            } else {
-                ideas.push(`* ${this.generateContextualIdea(topic, type, i)}`);
-            }
-        }
-
-        return ideas.join('\n\n');
-    },
 
     paraphraseText(text, style = 'neutral') {
         if (!text) return "";
@@ -3406,8 +3576,12 @@ const GuahhEngine = {
             this.onLog(`Fallback search failed: ${e.message}`, "warning");
         }
 
-        const fallbackText = this.generateConversationalFallback(effectiveQuery);
-        let text = fallbackText;
+        // NEW: Generative Fill (Try to squeeze an answer out of memory even if confidence is low)
+        let text = this.attemptGenerativeFill(effectiveQuery, topic);
+
+        if (!text) {
+            text = this.generateConversationalFallback(effectiveQuery);
+        }
 
         // Add proactive follow-up for general templates
         if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {
@@ -3554,6 +3728,42 @@ const GuahhEngine = {
         return synthesized.trim();
     },
 
+    attemptGenerativeFill(query, topic) {
+        // Last ditch effort: scan memory for keywords and assemble sentences
+        // This is less strict than "retrieveRelevant"
+
+        const keywords = this.extractEntities(query).keywords;
+        if (keywords.length === 0) return null;
+
+        const candidates = [];
+        const seen = new Set();
+
+        // Scan random sample of memory for keyword hits
+        // (We don't scan everything to save time)
+        const sampleSize = Math.min(this.memory.length, 500);
+        for (let i = 0; i < sampleSize; i++) {
+            const doc = this.memory[Math.floor(Math.random() * this.memory.length)];
+            if (!doc || !doc.a) continue;
+
+            let hits = 0;
+            keywords.forEach(k => {
+                if (doc.a.toLowerCase().includes(k.toLowerCase())) hits++;
+            });
+
+            if (hits > 0 && !seen.has(doc.a)) {
+                candidates.push({ text: doc.a, hits });
+                seen.add(doc.a);
+            }
+        }
+
+        if (candidates.length === 0) return null;
+
+        candidates.sort((a, b) => b.hits - a.hits);
+        const best = candidates.slice(0, 3).map(c => c.text).join(' ');
+
+        return "I'm not 100% sure, but here is what I found related to that:\n\n" + best;
+    },
+
     clusterDocumentsByTheme(docs) {
         // Simple clustering by token overlap
         const clusters = [];
@@ -3632,45 +3842,52 @@ const GuahhEngine = {
     summarizeText(text) {
         if (!text) return "";
 
-        // Split into sentences using a smarter regex that avoids splitting on "Mr.", "Mrs.", "etc."
-        // (Simplified for performance, but handles basic cases)
-        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        // 1. Clean and tokenize text
+        // Split into sentences (robust split for standard punctuation)
+        const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
         const cleanSentences = sentences.map(s => s.trim()).filter(s => s.length > 20);
 
         if (cleanSentences.length <= 3) {
-            return "That's already quite concise: " + text;
+            return text; // Too short to summarize effectively
         }
 
-        // Key algorithm:
-        // 1. Keep the first sentence (Introduction/Hook).
-        // 2. Keep the last sentence (Conclusion).
-        // 3. Pick "important" sentences from the middle based on keyword density or position.
+        // 2. Tokenize words for TF-IDF
+        const words = text.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
+        const wordFreq = {};
+        words.forEach(w => wordFreq[w] = (wordFreq[w] || 0) + 1);
 
-        const summaryArr = [];
+        // 3. Score Sentences
+        const sentenceScores = cleanSentences.map((sentence, index) => {
+            const sWords = sentence.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
+            let score = 0;
 
-        // Always include first sentence
-        summaryArr.push(cleanSentences[0]);
+            sWords.forEach(w => {
+                // TF-IDF simplified: Word Frequency in doc * Inverse Sentence Frequency
+                // (Words that appear in many sentences are less important for uniqueness)
+                // Here we just use raw frequency as a proxy for "topic importance" in this single doc
+                if (wordFreq[w]) score += wordFreq[w];
+            });
 
-        // Middle selection
-        if (cleanSentences.length > 10) {
-            // Pick 3 sentences distributed evenly
-            const step = Math.floor((cleanSentences.length - 2) / 3);
-            for (let i = 1; i <= 3; i++) {
-                const idx = 1 + (step * i);
-                if (cleanSentences[idx]) summaryArr.push(cleanSentences[idx]);
-            }
-        } else if (cleanSentences.length > 3) {
-            // Pick 1 middle sentence
-            const mid = Math.floor(cleanSentences.length / 2);
-            summaryArr.push(cleanSentences[mid]);
-        }
+            // Position Bias: Boost first and last sentences
+            if (index === 0) score *= 1.5;
+            if (index === cleanSentences.length - 1) score *= 1.2;
 
-        // Always include last sentence
-        if (cleanSentences.length > 1) {
-            summaryArr.push(cleanSentences[cleanSentences.length - 1]);
-        }
+            // Length Penalty: Penalize very short or very long sentences slightly
+            if (sWords.length < 5) score *= 0.5;
 
-        return summaryArr.join(' ');
+            return { sentence, score, index };
+        });
+
+        // 4. Select Top Sentences (Top 30% or max 5)
+        const targetCount = Math.max(2, Math.min(5, Math.ceil(cleanSentences.length * 0.3)));
+
+        // Sort by score descending to find best ones
+        const topSentences = [...sentenceScores].sort((a, b) => b.score - a.score).slice(0, targetCount);
+
+        // 5. Reassemble in Original Order
+        topSentences.sort((a, b) => a.index - b.index);
+
+        return topSentences.map(s => s.sentence).join(' ');
     },
 
     generateNeuralText(sourceText, targetLength = 40, retryCount = 0) {
@@ -4827,86 +5044,126 @@ const GuahhEngine = {
 
         // 1. Process Context into Data Points
         let cleanContext = context ? context.replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim() : "";
-        // Split into sentences, handling common abbreviations (basic check)
         let sentences = cleanContext.match(/[^.!?]+[.!?]+/g) || [];
-        sentences = sentences.map(s => s.trim()).filter(s => s.length > 20); // Filter short garbage
+        sentences = sentences.map(s => s.trim()).filter(s => s.length > 20);
 
         this.onLog(`Extracted ${sentences.length} fact sentences for essay.`, "data");
 
-        // 2. Distribute Facts (Round Robin Strategy)
-        const facts = {
-            intro: [],
-            history: [],
-            impact: [],
-            future: []
-        };
+        // 2. Define Dynamic Sections based on Topic
+        let sections = [
+            { id: 'intro', title: 'Introduction', count: 2 },
+            { id: 'history', title: 'Historical Context', keywords: /history|origin|began|ancient|early/i, count: 3 },
+        ];
 
-        // If we have facts, distribute them specific to section if possible (keywords)
-        // Otherwise, simply fill buckets
-        const historyKeywords = /history|origin|began|invented|ancient|century|early|first/i;
-        const impactKeywords = /impact|use|function|role|important|significance|modern|today/i;
-        const futureKeywords = /future|challenge|potential|develop|ongoing|will/i;
+        // Conditional Sections
+        if (/technology|ai|computer|future|digital/i.test(topic)) {
+            sections.push({ id: 'ethics', title: 'Ethical Considerations', keywords: /ethic|moral|privacy|data|risk/i, count: 3 });
+            sections.push({ id: 'future', title: 'Future Outlook', keywords: /future|will|predict|trend/i, count: 3 });
+        } else if (/war|battle|politics|government/i.test(topic)) {
+            sections.push({ id: 'impact', title: 'Societal Impact', keywords: /society|people|population|effect|consequence/i, count: 3 });
+            sections.push({ id: 'conflict', title: 'Key Conflicts', keywords: /fight|war|dispute|tension/i, count: 3 });
+        } else if (/nature|environment|animal|plant/i.test(topic)) {
+            sections.push({ id: 'environment', title: 'Environmental Role', keywords: /ecosystem|role|function|habitat/i, count: 3 });
+            sections.push({ id: 'conservation', title: 'Conservation Efforts', keywords: /protect|save|endanger|conserve/i, count: 3 });
+        } else {
+            // General Fallbacks
+            sections.push({ id: 'significance', title: 'Significance', keywords: /important|significant|impact|role/i, count: 3 });
+            sections.push({ id: 'application', title: 'Modern Applications', keywords: /use|apply|modern|today/i, count: 3 });
+            sections.push({ id: 'challenges', title: 'Challenges and Criticisms', keywords: /problem|issue|critic|challenge/i, count: 3 });
+        }
 
-        sentences.forEach(s => {
-            if (historyKeywords.test(s)) facts.history.push(s);
-            else if (futureKeywords.test(s)) facts.future.push(s);
-            else if (impactKeywords.test(s)) facts.impact.push(s);
-            else {
-                // Round robin overflow
-                if (facts.intro.length < 2) facts.intro.push(s);
-                else if (facts.history.length < 3) facts.history.push(s);
-                else if (facts.impact.length < 3) facts.impact.push(s);
-                else facts.future.push(s);
+        // Always have conclusion
+        sections.push({ id: 'conclusion', title: 'Conclusion', count: 2 });
+
+        // 3. Distribute Facts to Sections
+        const facts = {};
+        const usedSentences = new Set();
+
+        sections.forEach(sec => {
+            facts[sec.id] = [];
+            if (sec.keywords) {
+                sentences.forEach(s => {
+                    if (!usedSentences.has(s) && sec.keywords.test(s)) {
+                        facts[sec.id].push(s);
+                        usedSentences.add(s);
+                    }
+                });
             }
         });
 
-        // Helper to get a paragraph or fallback
-        const buildPara = (sentences, genericStart, genericEnd) => {
-            if (sentences.length === 0) return `${genericStart} ${genericEnd}`;
-            // Combine sentences with simple transitions if needed, or just flow
-            return `${genericStart} ` + sentences.join(" ") + (sentences.length < 2 ? ` ${genericEnd}` : "");
-        };
+        // Fill remaining buckets round-robin
+        let secIndex = 0;
+        sentences.forEach(s => {
+            if (!usedSentences.has(s)) {
+                // Skip intro/conclusion for random filling usually, unless empty
+                let targetSec = sections[secIndex % (sections.length - 2) + 1]; // Skip first (intro) and last (conclusion) usually
+                facts[targetSec.id].push(s);
+                secIndex++;
+            }
+        });
 
-        // 3. Construct Sections
+        // 4. Generate Content
+        let essayParts = [`## ${title}\n`];
 
-        // Introduction
-        const introHook = `The concept of ${topic} is a subject of significant interest.`;
-        const introFacts = facts.intro.length > 0 ? facts.intro.join(" ") : `To understand ${topic}, one must look at its core definition.`;
-        const thesis = `This essay examines the historical background, modern significance, and future outlook of ${topic}.`;
-        const intro = `${introHook} ${introFacts} ${thesis}`;
+        sections.forEach((sec, idx) => {
+            const sectionFacts = facts[sec.id] || [];
 
-        // Body 1: History / Background
-        const body1 = buildPara(
-            facts.history,
-            "To begin with, the historical context provides a necessary foundation.",
-            `The origins of ${topic} reveal a progression that has shaped its current state.`
-        );
+            // Special handling for Intro
+            if (sec.id === 'intro') {
+                const hook = `The concept of **${topic}** has long been a subject of significant interest and debate.`;
+                const thesis = `This essay explores its history, key characteristics, and broader impact on the world today.`;
+                const introBody = sectionFacts.length > 0 ? sectionFacts.join(" ") : `Defined by its unique properties, ${topic} stands as a cornerstone in its field.`;
+                essayParts.push(`${hook} ${introBody} ${thesis}`);
+                return;
+            }
 
-        // Body 2: Significance / Details
-        const body2 = buildPara(
-            facts.impact,
-            "Furthermore, the significance of this subject is evident in its widespread application.",
-            `It is clear that ${topic} plays a pivotal role in its respective field.`
-        );
+            // Special handling for Conclusion
+            if (sec.id === 'conclusion') {
+                const summary = `In conclusion, ${topic} remains a dynamic and vital subject.`;
+                const finalThought = `As we look to the future, its influence is likely to only grow stronger, warranting continued study and attention.`;
+                essayParts.push(`${summary} From the historical foundations to modern complexities, the journey of ${topic} is one of constant evolution. ${finalThought}`);
+                return;
+            }
 
-        // Body 3: Future / Challenges / Conclusion of Body
-        const body3 = buildPara(
-            facts.future,
-            "However, it is also important to consider the ongoing developments and challenges.",
-            `As time progresses, ${topic} continues to evolve, presenting both new opportunities and complexities.`
-        );
+            // Body Paragraphs
+            const para = this.buildElaboratedParagraph(topic, sec.title, sectionFacts);
+            essayParts.push(para);
+        });
 
-        // Conclusion
-        const conclusionStart = "In conclusion,";
-        const finalSummary = `${topic} remains a dynamic and vital topic.`;
-        const finalThought = facts.intro.length > 0
-            ? `Reflecting on the facts presented, such as ${facts.intro[0].toLowerCase().replace(/[.!?]$/, '')}, we see its enduring value.`
-            : "Detailed analysis confirms its importance in the broader context.";
+        return essayParts.join('\n\n');
+    },
 
-        const conclusion = `${conclusionStart} ${finalSummary} from its history to its modern impact, it offers valuable insights. ${finalThought}`;
+    buildElaboratedParagraph(topic, sectionTitle, facts) {
+        // Start with a strong topic sentence
+        let para = `### ${sectionTitle}\n\n`; // Add subheaders for structure? Or just text. Let's do text for flow, maybe bold start.
+        // Actually user wanted structure, so subheaders or just clear topic sentences.
+        // Let's stick to standard paragraph flow but ensure length.
 
-        // Assemble
-        return `## ${title}\n\n${intro}\n\n${body1}\n\n${body2}\n\n${body3}\n\n${conclusion}`;
+        para = ""; // Reset, standard essay format usually doesn't have subheaders every para
+        const transition = this.getRandomTransition();
+        const start = `${transition} regarding the **${sectionTitle.toLowerCase()}** of ${topic}, there are several key points to consider.`;
+
+        let body = "";
+        if (facts.length >= 3) {
+            body = facts.join(" ");
+        } else if (facts.length > 0) {
+            // Elaboration needed
+            body = facts[0];
+            body += ` This particular aspect highlights the underlying complexity of ${topic}.`;
+            if (facts[1]) body += ` Additionally, ${facts[1]}`;
+            body += ` It is worth noting that such details often play a crucial role in the broader context.`;
+        } else {
+            // Full hallucination/logic fill needed
+            body = `When examining the ${sectionTitle.toLowerCase()}, one finds a rich tapestry of influencing factors. Evidence suggests that this area is critical to a holistic understanding of ${topic}. Experts often cite this as a primary driver of change/`;
+            body += ` The implications here extend far beyond the immediate observations, suggesting a deep interconnectedness with other fields.`;
+        }
+
+        return `${start} ${body}`;
+    },
+
+    getRandomTransition() {
+        const t = ["Furthermore,", "Moreover,", "In addition,", "Conversely,", "Turning our attention to,", "Another significant aspect is,"];
+        return t[Math.floor(Math.random() * t.length)];
     },
 
     generateCreativeText(topic, query) {

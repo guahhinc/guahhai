@@ -24,6 +24,7 @@ body {
     background: var(--bg);
     color: var(--text);
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
 }
 
@@ -31,6 +32,7 @@ body {
 .app-container {
     display: flex;
     height: 100vh;
+    height: 100dvh;
     width: 100%;
 }
 
@@ -768,6 +770,7 @@ body {
     flex-direction: column;
     flex-shrink: 0;
     height: 100vh;
+    height: 100dvh;
     position: relative;
     transition: transform 0.3s ease;
 }

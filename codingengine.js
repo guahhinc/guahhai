@@ -66,15 +66,15 @@ const GuahhCodingEngine = {
                 name: "Single File Website",
                 isDefault: true,
                 keywords: ['website', 'site', 'web', 'page', 'simple'],
-                generate: (topic) => ({
+                generate: (topic, attributes) => ({
                     'index.html': `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>${topic}</title>
     <style>
-        :root { --primary: #2563eb; --text: #1f2937; --bg: #f3f4f6; --card: #ffffff; }
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; margin: 0; background: var(--bg); color: var(--text); line-height: 1.6; }
+        :root { --primary: ${attributes?.color || '#2563eb'}; --text: #1f2937; --bg: #f3f4f6; --card: #ffffff; }
+        body { font-family: '${attributes?.font || 'Inter'}', system-ui, -apple-system, sans-serif; margin: 0; background: var(--bg); color: var(--text); line-height: 1.6; }
         header { background: var(--card); padding: 1.5rem 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
         .logo { font-weight: 800; font-size: 1.5rem; letter-spacing: -0.05em; color: var(--primary); }
         nav { display: flex; gap: 1.5rem; }
@@ -481,6 +481,32 @@ c.onmousemove=e=>py=e.clientY-c.getBoundingClientRect().top-50;
         return topic.charAt(0).toUpperCase() + topic.slice(1);
     },
 
+    extractAttributes(query) {
+        const q = query.toLowerCase();
+        const attrs = {
+            color: '#2563eb', // Default blue
+            secondary: '#1f2937',
+            font: 'Inter',
+            style: 'modern'
+        };
+
+        // Color extraction (basic)
+        if (q.includes('red')) { attrs.color = '#ef4444'; attrs.secondary = '#7f1d1d'; }
+        else if (q.includes('green')) { attrs.color = '#10b981'; attrs.secondary = '#064e3b'; }
+        else if (q.includes('blue')) { attrs.color = '#2563eb'; attrs.secondary = '#1e3a8a'; }
+        else if (q.includes('purple')) { attrs.color = '#7c3aed'; attrs.secondary = '#4c1d95'; }
+        else if (q.includes('orange')) { attrs.color = '#f97316'; attrs.secondary = '#7c2d12'; }
+        else if (q.includes('black') || q.includes('dark')) { attrs.color = '#111827'; attrs.secondary = '#374151'; }
+        else if (q.includes('pink')) { attrs.color = '#ec4899'; attrs.secondary = '#831843'; }
+
+        // Style extraction
+        if (q.includes('minimal')) attrs.style = 'minimal';
+        if (q.includes('retro')) attrs.style = 'retro';
+        if (q.includes('fun') || q.includes('playful')) attrs.style = 'playful';
+
+        return attrs;
+    },
+
     // --- HELPER: SMART TEMPLATE SELECTOR (Intent > Default > Random) ---
     selectTemplate(language, query) {
         const libs = this.templates[language];
@@ -517,9 +543,9 @@ c.onmousemove=e=>py=e.clientY-c.getBoundingClientRect().top-50;
             }
         },
         html: {
-            generate(topic, q, engine) {
+            generate(topic, q, engine, attributes) {
                 const template = engine.selectTemplate('html', q);
-                return template.generate(topic);
+                return template.generate(topic, attributes);
             }
         },
         game: {
@@ -565,8 +591,9 @@ c.onmousemove=e=>py=e.clientY-c.getBoundingClientRect().top-50;
         // 1. Analyze
         const language = this.detectLanguage(query);
         const topic = this.extractTopic(query);
+        const attributes = this.extractAttributes(query);
 
-        console.log(`[CodingEngine PRO] Language: ${language}, Topic: ${topic}`);
+        console.log(`[CodingEngine PRO] Language: ${language}, Topic: ${topic}, Attrs:`, attributes);
 
         // 2. Select Strategy
         let strategy = this.strategies[language];
@@ -576,8 +603,8 @@ c.onmousemove=e=>py=e.clientY-c.getBoundingClientRect().top-50;
         if (!strategy) strategy = this.strategies.python;
 
         // 3. Generate Project Files
-        // Pass 'this' as engine context for helper methods
-        const projectFiles = strategy.generate(topic, query, this);
+        // Pass 'this' as engine context for helper methods, and attributes
+        const projectFiles = strategy.generate(topic, query, this, attributes);
 
         // 4. Auto-Generate README if not present
         if (!projectFiles['README.md'] && !language.includes('html') && !language.includes('game')) {
