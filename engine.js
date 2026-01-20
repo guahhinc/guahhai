@@ -113,6 +113,30 @@ const GuahhEngine = {
 
 
 
+    // Fun Facts Database
+    funFacts: [
+        "Honey never spoils. Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still perfectly edible.",
+        "Octopuses have three hearts. Two pump blood to the gills, while one pumps it to the rest of the body.",
+        "Bananas are berries, but strawberries aren't. In botanical terms, berries are fleshy fruits produced from a single ovary.",
+        "A group of flamingos is called a 'flamboyance'.",
+        "Wombat poop is cube-shaped. This helps it stay in place and mark territory.",
+        "The Eiffel Tower can be 15 cm taller during the summer due to thermal expansion of the iron.",
+        "A day on Venus is longer than a year on Venus. It rotates very slowly on its axis.",
+        "There are more trees on Earth than stars in the Milky Way galaxy. (Approx 3 trillion trees vs 100-400 billion stars)",
+        "The first computer bug was an actual moth found trapped in a relay of the Harvard Mark II computer in 1947.",
+        "Honeybees can recognize human faces.",
+        "Sloths can hold their breath longer than dolphins can (up to 40 minutes).",
+        "The shortest war in history lasted 38 minutes between Britain and Zanzibar in 1896.",
+        "Cleopatra lived closer in time to the moon landing than to the construction of the Great Pyramid of Giza.",
+        "A cloud weighs around a million tonnes.",
+        "The unicorn is the national animal of Scotland.",
+        "Humans share about 60% of their DNA with bananas.",
+        "There is a species of jellyfish (Turritopsis dohrnii) that is biologically immortal.",
+        "Sharks existed before trees.",
+        "A jiffy is an actual unit of time, defined as 1/100th of a second.",
+        "The total weight of all ants on Earth is comparable to the total weight of all humans."
+    ],
+
     // Callbacks
     onLog: (msg, type) => console.log(`[${type}] ${msg}`),
 
@@ -417,6 +441,25 @@ const GuahhEngine = {
                 .replace(/[^\d\s+\-*/().*]|(?<!Math)\./g, '') // strictly allow only math chars
                 .trim();
 
+            // Natural Language Math Support - Percentages and Phrases
+            if (expr.includes(' of ')) {
+                // "20% of 50" -> "50 * 0.20"
+                const percentMatch = expr.match(/(\d+)%\s+of\s+(\d+)/);
+                if (percentMatch) {
+                    const pct = parseFloat(percentMatch[1]) / 100;
+                    const val = parseFloat(percentMatch[2]);
+                    return { expr: `${percentMatch[1]}% of ${val}`, result: pct * val };
+                }
+
+                // "half of 100"
+                const halfMatch = expr.match(/half\s+of\s+(\d+)/);
+                if (halfMatch) return { expr: `Half of ${halfMatch[1]}`, result: parseFloat(halfMatch[1]) / 2 };
+
+                // "double 50"
+                const doubleMatch = expr.match(/double\s+(\d+)/);
+                if (doubleMatch) return { expr: `Double ${doubleMatch[1]}`, result: parseFloat(doubleMatch[1]) * 2 };
+            }
+
             if (!cleanExpr || !/^[\d\s+\-*/().*]+$/.test(cleanExpr) || !/\d/.test(cleanExpr)) return null;
 
             // Safe evaluation using Function
@@ -487,7 +530,7 @@ const GuahhEngine = {
 
     isGreeting(query) {
         const greetings = [
-            /^(hi|hello|hey|greetings|howdy|sup|yo|waddup|what's good|what's crackin|what's up|whats up|wazzup)$/i,
+            /^(hi|hello|hey|greetings|howdy|sup|yo|waddup|what's good|what's crackin|what's up|whats up|wazzup|what up)$/i,
             /^(hi|hello|hey|greetings|howdy|sup|yo|waddup)\s+(there|guahh|ai|mate|friend)?$/i,
             /^good\s+(morning|afternoon|evening|day)$/i
         ];
@@ -563,14 +606,30 @@ const GuahhEngine = {
 
     generateAlternativeQueries(originalQuery, topic) {
         const alternatives = [];
-        if (topic && topic !== originalQuery) alternatives.push(topic);
-        if (topic) {
+
+        // 1. Topic-based expansions
+        if (topic && topic !== originalQuery) {
+            alternatives.push(topic);
             if (topic.endsWith('s')) alternatives.push(topic.slice(0, -1));
             else alternatives.push(topic + 's');
         }
+
+        // 2. Keyword extraction
         const keywords = this.extractKeywords(originalQuery);
         if (keywords.length > 0) alternatives.push(keywords[0]);
-        return [...new Set(alternatives)];
+
+        // 3. New: Context-Aware Suggestions (Hardcoded associations for now, could be ML-based later)
+        // This makes suggestions feel much "smarter" and relevant
+        if (topic) {
+            const t = topic.toLowerCase();
+            if (t.includes('space') || t.includes('planet')) alternatives.push('Black holes', 'Mars exploration', 'Solar system');
+            if (t.includes('ai') || t.includes('artificial')) alternatives.push('Future of AI', 'Machine Learning', 'AI ethics');
+            if (t.includes('food') || t.includes('cook')) alternatives.push('Healthy recipes', 'Culinary techniques', 'History of pizza');
+            if (t.includes('history') || t.includes('war')) alternatives.push('Ancient civilizations', 'World War II', 'Industrial Revolution');
+            if (t.includes('animal')) alternatives.push('Endangered species', 'Marine life', 'Strange insects');
+        }
+
+        return [...new Set(alternatives)].slice(0, this.maxAlternativeQueries);
     },
 
     // ========== ADVANCED INTENT ANALYSIS ==========
@@ -598,7 +657,8 @@ const GuahhEngine = {
         // === CONVERSATIONAL INTENTS ===
 
         // Greeting intent
-        if (/^(hi|hello|hey|greetings|howdy|sup|yo|good (morning|afternoon|evening)|hola|bonjour)/i.test(q.trim())) {
+        // Expanded to include "what up" and variants explicitly
+        if (/^(hi|hello|hey|greetings|howdy|sup|yo|good (morning|afternoon|evening)|hola|bonjour|what up|what's up|waddup)/i.test(q.trim())) {
             intents.push({ type: 'greeting', confidence: 0.95 });
         }
 
@@ -637,6 +697,11 @@ const GuahhEngine = {
         // How-to question
         if (/^how (do|can|to|should|would)\s/i.test(q) || /how to\s/i.test(q) || /way to\s/i.test(q)) {
             intents.push({ type: 'how_to', confidence: 0.92 });
+        }
+
+        // Fun Fact Intent
+        if (/(tell me a|random)?\s*fun fact|interesting fact|fact about/i.test(q)) {
+            intents.push({ type: 'fun_fact', confidence: 0.98 });
         }
 
         // Why/Cause question
@@ -1127,11 +1192,14 @@ const GuahhEngine = {
 
         // === PERSON QUERIES ===
         if (/who is|prime minister|president|leader|ceo|founder|created by/i.test(q)) {
-            // "who is the prime minister of X" → "X" (the country/org)
-            let match = userQuery.match(/(?:prime minister|president|leader|king|queen|ruler)\s+of\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+            // "who is the prime minister of X" → "Politics of X" or just "X"
+            // Searching for "X" often yields the infobox with the leader's name faster than searching for "Prime Minister of X" (which might be a list).
+            let match = userQuery.match(/(?:prime minister|president|leader|king|queen|ruler|governor|mayor)\s+of\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
             if (match) {
-                searchQuery = match[1].trim();
-                this.onLog(`→ Leadership query detected: "${searchQuery}"`, "data");
+                const entity = match[1].trim();
+                // Strategy: Search for the country/org directly to get the infobox data
+                searchQuery = entity;
+                this.onLog(`→ Leadership query detected: Searching entity "${searchQuery}" for leader info`, "data");
                 return searchQuery;
             }
 
@@ -1160,6 +1228,22 @@ const GuahhEngine = {
             }
         }
 
+        // === QUALITY / OPINION QUERIES ("Is Pepsi good?", "Is X safe?") ===
+        if (/^is\s+(.+?)\s+(good|bad|safe|healthy|dangerous|harmful|effective|worth it)/i.test(q)) {
+            let match = userQuery.match(/^is\s+(.+?)\s+(?:good|bad|safe|healthy|dangerous|harmful|effective|worth it)/i);
+            if (match) {
+                let subject = match[1].trim();
+                // Add context to search
+                let searchTerms = `${subject}`;
+                if (/food|drink|eat|diet/i.test(q)) searchTerms += " health effects";
+                else if (/movie|game|show|book/i.test(q)) searchTerms += " reviews";
+                else searchTerms += " criticism and benefits";
+
+                this.onLog(`→ Quality/Opinion query detected: "${searchTerms}"`, "data");
+                return searchTerms;
+            }
+        }
+
         // === HOW-TO / PROCESS QUERIES ===
         if (/how (do|does|to|can|is)/i.test(q)) {
             // "how does X work" → "X" or "how X works"
@@ -1167,6 +1251,17 @@ const GuahhEngine = {
             if (match) {
                 searchQuery = match[1].trim();
                 this.onLog(`→ How-it-works query detected: "${searchQuery}"`, "data");
+                return searchQuery;
+            }
+
+            // "how to X" -> "X"
+            match = userQuery.match(/how\s+to\s+(.+)/i);
+            if (match) {
+                searchQuery = match[1].trim();
+                // Improve search for "how to make cake" -> "Make cake" is okay, but "Cake recipe" is better.
+                if (/make|cook|bake/i.test(searchQuery)) searchQuery += " recipe";
+
+                this.onLog(`→ How-to query detected: "${searchQuery}"`, "data");
                 return searchQuery;
             }
         }
@@ -1182,11 +1277,27 @@ const GuahhEngine = {
             }
         }
 
-        // === EXTRACT PROPER NOUNS (Fallback) ===
+        // === BROAD ENTITY / DEFINITION QUERIES ===
+        // "What is X", "Who is X", "Where is X" - Generalized Fallback
+        // This catches almost everything not caught above.
+        let broadMatch = userQuery.match(/^(?:what|who|where|when|why|how)\s+(?:is|are|was|were|do|does|did)\s+(?:the\s+|a\s+|an\s+)?(.+?)(?:\?|$)/i);
+        if (broadMatch) {
+            let potentialEntity = broadMatch[1].trim();
+            // Clean up common trailing words that might be part of the sentence structure but not the entity
+            potentialEntity = potentialEntity.replace(/\s+(?:mean|work|located|found|born|died|from|made of|used for)\??$/i, '');
+
+            if (potentialEntity.length > 2) { // Avoid "it", "he", "she" if possible logic handled elsewhere or too short
+                searchQuery = potentialEntity;
+                this.onLog(`→ Broad Entity detection: "${searchQuery}"`, "data");
+                return searchQuery;
+            }
+        }
+
+        // === EXTRACT PROPER NOUNS (Final Fallback) ===
         const properNouns = userQuery.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g);
         if (properNouns && properNouns.length > 0) {
-            // Prefer longer phrases
-            properNouns.sort((a, b) => b.split(' ').length - a.split(' ').length);
+            // Prefer longest proper noun phrase (e.g. "United States of America" over "United")
+            properNouns.sort((a, b) => b.length - a.length);
             searchQuery = properNouns[0];
             this.onLog(`→ Extracted proper noun: "${searchQuery}"`, "data");
             return searchQuery;
@@ -1249,6 +1360,93 @@ const GuahhEngine = {
         return null;
     },
 
+    // Intelligent response synthesis from search results
+    synthesizeSearchResponse(query, wikiText) {
+        if (!wikiText) return null;
+        // Clean wiki text first - remove [1], [2] citations
+        const cleanText = wikiText.replace(/\[\d+\]/g, '');
+        const sentences = cleanText.split(/(?<=[.!?])\s+/);
+        const q = query.toLowerCase();
+
+        let bestSentence = null;
+
+        // 1. "Who is" / Leadership Questions
+        if (/who is|prime minister|president|leader|ceo/i.test(q)) {
+            // Priority: Sentences with "current", "serving as", "is the", "since"
+            const nameMatch = q.match(/(?:prime minister|president|leader) of (.+)/i);
+            const entity = nameMatch ? nameMatch[1] : null;
+
+            for (const s of sentences) {
+                if (s.length > 250) continue; // Skip massive sentences
+
+                // High confidence match
+                if (/current|serving as|since \d{4}|assumed office/i.test(s) &&
+                    (!entity || s.toLowerCase().includes(entity.toLowerCase()))) {
+                    bestSentence = s;
+                    break;
+                }
+                // Fallback: "X is the Y"
+                if (/\b is the \b/i.test(s) && !bestSentence) {
+                    bestSentence = s;
+                }
+            }
+        }
+
+        // 2. "Is X Y" / Boolean / Opinion Questions
+        else if (/^is\s+|are\s+/i.test(q)) {
+            const keywords = this.extractKeywords(q);
+
+            for (const s of sentences) {
+                const sLow = s.toLowerCase();
+                // Check intersection of keywords
+                const hitCount = keywords.filter(k => sLow.includes(k)).length;
+                if (hitCount >= 2 || (hitCount >= 1 && keywords.length === 1)) {
+                    bestSentence = s;
+                }
+            }
+        }
+
+        // 3. General "What is" / Definition Questions
+        else {
+            // Broad fallback: Try to find sentences that define the subject
+            // e.g. "X is a...", "X refers to..."
+            // or sentences containing the subject + key verb
+            const subjectMatch = q.match(/^(?:what|who|where|when|why|how)\s+(?:is|are|was|were)\s+(?:the\s+|a\s+|an\s+)?(.+?)(?:\?|$)/i);
+            const subject = subjectMatch ? subjectMatch[1].toLowerCase().trim() : null;
+
+            if (subject) {
+                for (const s of sentences) {
+                    const sLow = s.toLowerCase();
+                    // Definition / Identity pattern: "Subject is..." or "Subject refers to..."
+                    if (sLow.startsWith(subject + " is") || sLow.startsWith(subject + " refer") || sLow.includes(subject + " is a") || sLow.includes(subject + " was a")) {
+                        bestSentence = s;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Construct Response
+        let finalResponse = "";
+
+        if (bestSentence) {
+            finalResponse = bestSentence;
+            // Add 1-2 sentences of context (the ones immediately following the best match usually work well)
+            const index = sentences.indexOf(bestSentence);
+            if (index !== -1 && index + 1 < sentences.length) {
+                finalResponse += " " + sentences[index + 1];
+            }
+        } else {
+            // Fallback: If we couldn't find a specific "is a" sentence, give the user the full context.
+            // Return the first ~3-4 sentences to act as a comprehensive summary.
+            // Filter out obviously bad lines.
+            const validSentences = sentences.filter(s => !s.includes("may refer to:") && s.trim().length > 20);
+            finalResponse = validSentences.slice(0, 4).join(' '); // Increased from 3 to 4 for better context
+        }
+
+        return finalResponse;
+    },
+
     analyzeQueryForSearch(query) {
         const q = query.toLowerCase();
         const analysis = {
@@ -1306,6 +1504,17 @@ const GuahhEngine = {
             .replace(/^(write|compose|create)\s+(about|on)\s+/i, '');
 
         cleanQuery = cleanQuery.replace(/\?+$/, '').trim();
+
+        // === STRATEGY 0: INTELLIGENT QUERY (Highest Priority) ===
+        // If the AI generated a specific smart query, try that first!
+        const aiQuery = this.generateIntelligentSearchQuery(originalQuery, null);
+        if (aiQuery && aiQuery !== originalQuery && aiQuery !== cleanQuery) {
+            strategies.push({
+                name: 'AI Generated Topic',
+                query: aiQuery,
+                priority: 12
+            });
+        }
 
         // === STRATEGY 1: Use exact proper nouns ===
         if (analysis.hasProperNoun) {
@@ -2656,7 +2865,20 @@ const GuahhEngine = {
             return { text: "I'm not sure what we're confirming, but I appreciate your enthusiasm! What shall we talk about next?", sources: ["Conversational"] };
         }
 
+        // 6. Fun Facts
+        if (intent === 'fun_fact') {
+            return { text: this.generateFunFact(), sources: ["Knowledge Base (Fun Facts)"] };
+        }
+
         return null; // Fallback to standard generation
+    },
+
+    generateFunFact() {
+        if (!this.funFacts || this.funFacts.length === 0) return "Did you know? The hashtag symbol is technically called an octothorpe.";
+        const fact = this.funFacts[Math.floor(Math.random() * this.funFacts.length)];
+        const intros = ["Did you know?", "Here's a fun fact:", "Check this out:", "Interestingly,"];
+        const intro = intros[Math.floor(Math.random() * intros.length)];
+        return `${intro} ${fact}`;
     },
 
     async generateResponse(query) {
@@ -3618,7 +3840,9 @@ const GuahhEngine = {
             const wikiResult = await this.searchWikipedia(searchQuery, false);
             if (wikiResult) {
                 this.onLog("✓ Wikipedia Data Retrieved.", "success");
-                let text = wikiResult;
+
+                // Synthesize a conversational answer
+                let text = this.synthesizeSearchResponse(effectiveQuery, wikiResult);
 
                 // Add follow up if topic is clear
                 if (topic && this.shouldAskFollowUp(effectiveQuery, text)) {

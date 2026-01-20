@@ -425,10 +425,11 @@ function typeWriter(element, text) {
 
     function type() {
         if (wordIndex < words.length) {
-            // Build text word by word
-            const currentText = words.slice(0, wordIndex + 1).join(' ');
+            // Build text word by word (2 words at a time for speed)
+            const chunkEnd = Math.min(wordIndex + 2, words.length);
+            const currentText = words.slice(0, chunkEnd).join(' ');
             element.innerHTML = formatMarkdown(currentText);
-            wordIndex++;
+            wordIndex += 2; // Increment by 2
             if (activeChat) activeChat.scrollTop = activeChat.scrollHeight;
             setTimeout(type, speed);
         } else {
@@ -542,12 +543,29 @@ function addFeedbackButtons(messageElement, query, response) {
     // ... (Feedback button logic remains the same but concise for now)
     const goodBtn = createBtn('👍', 'Good');
     const badBtn = createBtn('👎', 'Bad');
+    const copyBtn = createBtn('📋', 'Copy'); // Copy icon
 
     goodBtn.onclick = () => handleFeedback(goodBtn, badBtn, query, response, 'good');
     badBtn.onclick = () => handleFeedback(badBtn, goodBtn, query, response, 'bad');
 
+    copyBtn.onclick = () => {
+        navigator.clipboard.writeText(response).then(() => {
+            const originalText = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<span>✅</span> Copied';
+            copyBtn.classList.add('selected');
+            setTimeout(() => {
+                copyBtn.innerHTML = originalText;
+                copyBtn.classList.remove('selected');
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy:', err);
+            copyBtn.innerHTML = '<span>❌</span> Error';
+        });
+    };
+
     feedbackDiv.appendChild(goodBtn);
     feedbackDiv.appendChild(badBtn);
+    feedbackDiv.appendChild(copyBtn);
     messageElement.appendChild(feedbackDiv);
 }
 
