@@ -1044,3 +1044,90 @@ pre code {
     display: block;
     line-height: 1.5;
 }
+
+/* Version Selector */
+.version-selector {
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+
+.version-selector-btn {
+    width: 100%;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.6rem 0.8rem;
+    border-radius: 0.5rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s;
+}
+
+.version-selector-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--text-muted);
+}
+
+.chevron-icon {
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.version-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    margin-top: 0.25rem;
+    padding: 0.25rem;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    display: none;
+    flex-direction: column;
+    gap: 0.1rem;
+    animation: fadeIn 0.15s ease;
+}
+
+.version-dropdown.show {
+    display: flex;
+}
+
+.version-selector-btn.active .chevron-icon {
+    transform: rotate(180deg);
+}
+
+.dropdown-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.35rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.dropdown-option:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+}
+
+.dropdown-option.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    font-weight: 500;
+}
+
+.check-icon {
+    color: var(--accent);
+}
