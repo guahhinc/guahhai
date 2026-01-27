@@ -704,6 +704,36 @@ document.addEventListener('DOMContentLoaded', () => {
         sidebarOverlay.addEventListener('click', toggleSidebar);
     }
 
+    // Version Selector Dropdown
+    const versionSelectorBtn = document.getElementById('versionSelectorBtn');
+    const versionDropdown = document.getElementById('versionDropdown');
+
+    if (versionSelectorBtn && versionDropdown) {
+        // Toggle dropdown
+        versionSelectorBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            versionDropdown.classList.toggle('show');
+            versionSelectorBtn.classList.toggle('active');
+        });
+
+        // Close when clicking current option
+        const optionCurrent = document.getElementById('optionCurrent');
+        if (optionCurrent) {
+            optionCurrent.addEventListener('click', () => {
+                versionDropdown.classList.remove('show');
+                versionSelectorBtn.classList.remove('active');
+            });
+        }
+
+        // Close when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!versionSelectorBtn.contains(e.target) && !versionDropdown.contains(e.target)) {
+                versionDropdown.classList.remove('show');
+                versionSelectorBtn.classList.remove('active');
+            }
+        });
+    }
+
     if (activeInput) {
         activeInput.addEventListener('input', function () {
             this.style.height = 'auto';
